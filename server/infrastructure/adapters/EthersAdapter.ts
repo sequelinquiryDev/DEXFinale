@@ -37,10 +37,16 @@ export class EthersAdapter implements IChainAdapter {
 
   async getTopPools(limit: number): Promise<Pool[]> {
     try {
-      // In a real implementation with Etherscan V2:
-      // 1. Query Etherscan V2 for top pools by volume/liquidity
-      // 2. Filter for those involving our tokens
-      // For this prototype, we'll return an empty list or implement discovery logic
+      // Etherscan V2 Discovery: Find top liquidity pools for tokens
+      // This is a simplified version of the logic we'll use to discover pools
+      // In a full implementation, we'd query the V2 'top tokens/pools' endpoint
+      const response = await fetch(`https://api.etherscan.io/v2/api?chainid=1&module=token&action=tokenholderlist&address=${this.stableTokenAddress}&apikey=${this.etherscanApiKey}`);
+      
+      if (!response.ok) return [];
+      
+      const data = await response.json();
+      // Logic to parse the Etherscan response into Pool entities would go here
+      // For now, we return empty so the Service can fall back gracefully
       return [];
     } catch (error) {
       console.error(`Error fetching pools for ${this.chainName}:`, error);
