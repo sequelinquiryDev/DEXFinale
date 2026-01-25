@@ -6,6 +6,13 @@ export interface Token {
   address: string;
   decimals: number;
   logoURI?: string;
+  chainId: number;
+}
+
+export interface PoolData {
+  tokenA: string;
+  tokenB: string;
+  address: string;
 }
 
 export interface Pool {
