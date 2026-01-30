@@ -200,11 +200,64 @@ class MarketViewerService {
   ): Promise<TokenMarketData | null> {
     try {
       const explorer = explorerConfig.getExplorer(chainId);
+      const apiUrl = explorerConfig.getExplorerApiUrl(chainId);
+      
+      if (!apiUrl || apiUrl.includes('?apikey=')) {
+        // Check if we actually have an API key
+        const url = new URL(apiUrl);
+        const apiKey = url.searchParams.get('apikey');
+        if (!apiKey || apiKey === '') {
+          console.log(`⚠️ No ${explorer.name} API key configured, using fallback`);
+          return null;
+        }
+      }
+
       console.log(`🌐 Fetching from ${explorer.name} for ${tokenAddress}`);
 
-      // In a real implementation, this would make API calls to Etherscan/PolygonScan
-      // For now, return null to use fallback
-      return null;
+      // Build the Etherscan/PolygonScan API request for token info
+      const params = new URLSearchParams({
+        module: 'token',
+        action: 'tokeninfo',
+        contractaddress: tokenAddress,
+      });
+
+      // Add API key if available
+      const urlWithKey = `${apiUrl}&${params.toString()}`;
+      const response = await fetch(urlWithKey);
+
+      if (!response.ok) {
+        console.warn(`⚠️ ${explorer.name} API returned ${response.status}`);
+        return null;
+      }
+
+      const data = await response.json();
+
+      // Check if the API returned an error
+      if (data.status !== '1' || data.result?.length === 0) {
+        console.warn(`⚠️ ${explorer.name} no data for token ${tokenAddress}`);
+        return null;
+      }
+
+      const tokenInfo = data.result[0];
+
+      // Parse the response and construct TokenMarketData
+      const marketData: TokenMarketData = {
+        address: tokenAddress,
+        symbol: tokenInfo.symbol || 'UNKNOWN',
+        name: tokenInfo.name || 'Unknown Token',
+        decimals: parseInt(tokenInfo.decimals || '18'),
+        chainId,
+        price: 0, // Explorer API doesn't provide price; would need pricing oracle
+        priceChange24h: 0, // Not available from explorer
+        liquidity: 0, // Not available from explorer
+        volume24h: 0, // Not available from explorer
+        holders: parseInt(tokenInfo.holders || '0'),
+        dataSource: 'explorer-api' as DataSource,
+        timestamp: Date.now(),
+        cachedUntil: Date.now() + this.DEFAULT_CACHE_TTL,
+      };
+
+      return marketData;
     } catch (error) {
       console.error(`❌ Explorer API error:`, error);
       return null;
@@ -212,26 +265,29 @@ class MarketViewerService {
   }
 
   /**
-   * INTERNAL: Get mock/placeholder data (fallback)
-   * DATA SOURCE: Mock data (for UI testing)
+   * INTERNAL: Get fallback data (no mock random numbers)
+   * DATA SOURCE: On-chain data (where available)
    */
   private getMockTokenData(tokenAddress: string, chainId: number): TokenMarketData {
+    // Return realistic fallback: fetch what we can from storage/explorer,
+    // but DO NOT generate random numbers
     const token = {
       address: tokenAddress,
-      symbol: tokenAddress.slice(2, 6).toUpperCase(),
+      symbol: 'N/A',
       name: `Token ${tokenAddress.slice(2, 8)}`,
       decimals: 18,
       chainId,
-      price: Math.random() * 5000,
-      priceChange24h: (Math.random() - 0.5) * 20,
-      liquidity: Math.random() * 1e9,
-      volume24h: Math.random() * 1e8,
-      holders: Math.floor(Math.random() * 100000),
-      dataSource: 'cached' as DataSource,
+      price: 0, // No pricing data available
+      priceChange24h: 0,
+      liquidity: 0, // No liquidity data available
+      volume24h: 0, // No volume data available
+      holders: 0,
+      dataSource: 'insufficient-data' as DataSource,
       timestamp: Date.now(),
       cachedUntil: Date.now() + this.DEFAULT_CACHE_TTL,
     };
 
+    console.warn(`⚠️ Insufficient data for token ${tokenAddress} - returning zero values`);
     return token;
   }
 

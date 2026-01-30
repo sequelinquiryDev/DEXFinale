@@ -10,7 +10,7 @@
 /**
  * Source of data - for audit trail
  */
-export type DataSource = 'explorer-api' | 'rpc-call' | 'cached' | 'multicall' | 'alchemy-api';
+export type DataSource = 'explorer-api' | 'rpc-call' | 'cached' | 'multicall' | 'alchemy-api' | 'insufficient-data';
 
 /**
  * Complete market data for a single token
