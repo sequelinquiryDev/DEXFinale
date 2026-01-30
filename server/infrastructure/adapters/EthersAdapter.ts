@@ -30,14 +30,16 @@ const POOL_ABI = [
 
 export class EthersAdapter {
   private providers: { [chainId: number]: ethers.JsonRpcProvider };
-  private factory: ethers.Contract;
+  private factories: { [chainId: number]: ethers.Contract };
 
   constructor(rpcUrls: { [chainId: number]: string }) {
     this.providers = {};
+    this.factories = {};
     for (const chainId in rpcUrls) {
       this.providers[chainId] = new ethers.JsonRpcProvider(rpcUrls[chainId]);
+      // Create factory for each chain
+      this.factories[chainId] = new ethers.Contract(UNISWAP_V3_FACTORY, FACTORY_ABI, this.providers[chainId]);
     }
-    this.factory = new ethers.Contract(UNISWAP_V3_FACTORY, FACTORY_ABI, this.providers[1]);
   }
 
   private getProvider(chainId: number): ethers.JsonRpcProvider {
@@ -80,10 +82,15 @@ export class EthersAdapter {
 
   async getPoolAddress(tokenA: Token, tokenB: Token, chainId: number, fee: number): Promise<string | null> {
     const provider = this.getProvider(chainId);
-    const factory = this.factory.connect(provider);
-    const poolAddress = await (factory as BaseContract & { getPool: (a: string, b: string, c: number) => Promise<string> }).getPool(tokenA.address, tokenB.address, fee);
-    if (poolAddress && poolAddress !== "0x0000000000000000000000000000000000000000") {
-      return poolAddress;
+    const factory = this.factories[chainId].connect(provider);
+    try {
+      const poolAddress = await (factory as BaseContract & { getPool: (a: string, b: string, c: number) => Promise<string> }).getPool(tokenA.address, tokenB.address, fee);
+      if (poolAddress && poolAddress !== "0x0000000000000000000000000000000000000000") {
+        console.log(`✓ Found pool ${poolAddress.slice(0, 6)}... for ${tokenA.symbol}-${tokenB.symbol} (fee: ${fee})`);
+        return poolAddress;
+      }
+    } catch (error) {
+      console.error(`✗ Error getting pool for ${tokenA.symbol}-${tokenB.symbol}:`, error);
     }
     return null;
   }

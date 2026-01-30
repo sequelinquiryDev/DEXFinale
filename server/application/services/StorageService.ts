@@ -3,8 +3,8 @@ import path from 'path';
 import { Token, Pool } from '../../domain/entities';
 import { PoolRegistry, QuarantineRegistry } from '../../domain/types';
 
-// Resolve data directory relative to the server root
-const DATA_DIR = path.resolve(path.dirname(import.meta.url.replace('file://', '')), '../../data');
+// Resolve data directory - use process.cwd() for better compatibility
+const DATA_DIR = path.join(process.cwd(), 'server', 'data');
 
 export class StorageService {
   async read(fileName: string): Promise<any> {

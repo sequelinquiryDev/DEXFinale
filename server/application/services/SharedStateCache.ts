@@ -40,9 +40,10 @@ class SharedStateCache {
   public getPoolsForToken(tokenAddress: string): PoolState[] {
     const pools: PoolState[] = [];
     const poolStates = Array.from(this.poolStateStore.values());
+    const normalizedToken = tokenAddress.toLowerCase();
     for (let i = 0; i < poolStates.length; i++) {
         const pool = poolStates[i];
-        if (pool.token0 === tokenAddress || pool.token1 === tokenAddress) {
+        if (pool.token0.toLowerCase() === normalizedToken || pool.token1.toLowerCase() === normalizedToken) {
             pools.push(pool);
         }
     }

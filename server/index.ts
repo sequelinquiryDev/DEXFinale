@@ -1,10 +1,9 @@
 // Load .env file FIRST before any imports that use process.env
 import dotenv from 'dotenv';
 import path from 'path';
-import { fileURLToPath } from 'url';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const envPath = path.resolve(__dirname, '../.env');
+// Use process.cwd() which is reliable in all contexts
+const envPath = path.resolve(process.cwd(), '.env');
 dotenv.config({ path: envPath });
 
 import express from 'express';
@@ -68,15 +67,20 @@ app.locals.storageService = storageService;
 
 const discoveryService = new DiscoveryService(storageService, ethersAdapter);
 
-// Run pool discovery in the background
-(async () => {
-  try {
-    await discoveryService.discoverAndPrimeCache();
-    console.log('Initial pool discovery complete.');
-  } catch (error) {
-    console.error('Error during initial pool discovery:', error);
-  }
-})();
+// Run pool discovery in the background (unless disabled via env var)
+if (process.env.SKIP_DISCOVERY !== 'true') {
+  (async () => {
+    try {
+      await discoveryService.discoverAndPrimeCache();
+      console.log('Initial pool discovery complete.');
+    } catch (error) {
+      console.error('Error during initial pool discovery:', error);
+      console.warn('Continuing server startup despite discovery failure. Pool registry may be incomplete.');
+    }
+  })();
+} else {
+  console.log('⏭️  Pool discovery skipped (SKIP_DISCOVERY=true)');
+}
 
 const swapController = new SwapController();
 

@@ -13,6 +13,11 @@
  * 2. Pool data is maintained fresh by PoolScheduler
  * 3. Explorer APIs provide supplemental metadata (holders, contract creation date)
  * 
+ * HOT PATH INTEGRATION:
+ * - Receives tokens with pricingPools already attached (from cold path)
+ * - Calls PoolController.handleTokenInterest() to register pool interest
+ * - PoolScheduler monitors and executes multicall queries
+ * 
  * EXPLICIT DATA TRACKING:
  * Every response includes "dataSource" field showing where data came from
  */
@@ -20,6 +25,10 @@
 import { StorageService } from './StorageService';
 import { spotPricingEngine } from './SpotPricingEngine';
 import { sharedStateCache } from './SharedStateCache';
+import { poolController } from './PoolController';
+import { PoolScheduler } from './PoolScheduler';
+import { EthersAdapter } from '../../infrastructure/adapters/EthersAdapter';
+import { providersConfig } from '../../infrastructure/config/ProvidersConfig';
 import {
   TokenMarketData,
   MarketOverview,
@@ -32,9 +41,52 @@ class MarketViewerService {
   private storageService: StorageService;
   private cache: Map<string, { data: TokenMarketData; expireAt: number }> = new Map();
   private readonly DEFAULT_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+  private poolScheduler: PoolScheduler | null = null;
+  private schedulerStarted = false;
 
   constructor(storageService: StorageService) {
     this.storageService = storageService;
+    this.initializeScheduler();
+  }
+
+  /**
+   * Initialize PoolScheduler (hot path executor)
+   */
+  private initializeScheduler(): void {
+    try {
+      // Get RPC providers from config
+      const rpcProviders: { [chainId: number]: string } = {};
+      try {
+        rpcProviders[1] = providersConfig.getRpcProvider(1);
+      } catch {
+        rpcProviders[1] = process.env.ETHEREUM_PUBLIC_RPC || 'https://cloudflare-eth.com';
+      }
+      try {
+        rpcProviders[137] = providersConfig.getRpcProvider(137);
+      } catch {
+        rpcProviders[137] = process.env.POLYGON_PUBLIC_RPC || 'https://polygon-rpc.com';
+      }
+
+      const ethersAdapter = new EthersAdapter(rpcProviders);
+      this.poolScheduler = new PoolScheduler(this.storageService, ethersAdapter, 1);
+    } catch (error) {
+      console.error('Failed to initialize PoolScheduler:', error);
+    }
+  }
+
+  /**
+   * Start the pool scheduler if not already running
+   */
+  private async startSchedulerIfNeeded(): Promise<void> {
+    if (this.schedulerStarted || !this.poolScheduler) return;
+
+    try {
+      await this.poolScheduler.start();
+      this.schedulerStarted = true;
+      console.log('✓ Pool scheduler started by MarketViewerService');
+    } catch (error) {
+      console.error('Error starting pool scheduler:', error);
+    }
   }
 
   /**
@@ -73,7 +125,7 @@ class MarketViewerService {
     }
 
     // Compute price using SpotPricingEngine (uses pool data from SharedStateCache)
-    const price = spotPricingEngine.computeSpotPrice(tokenAddress, chainId);
+    const price = await spotPricingEngine.computeSpotPrice(tokenAddress, chainId);
 
     // Build market data response
     const marketData: TokenMarketData = {
@@ -99,18 +151,57 @@ class MarketViewerService {
   /**
    * Get market overview for all tokens on a network
    * 
+   * HOT PATH: Called when UI requests token prices.
+   * 1. Notifies PoolController of token interest (maps to pools)
+   * 2. Starts PoolScheduler if needed
+   * 3. Fetches pricing data for each token
+   * 
    * @param chainId Network chain ID
+   * @param tokensWithPools Tokens with pricingPools already attached
    * @returns Market overview with all tokens
    */
-  public async getMarketOverview(chainId: number): Promise<MarketOverview> {
+  public async getMarketOverview(chainId: number, tokensWithPools?: any[]): Promise<MarketOverview> {
     console.log(`📊 Fetching market overview for chain ${chainId}`);
 
-    // Get tokens for this network
-    const tokens = await this.storageService.getTokensByNetwork(chainId);
+    // If tokens not provided, get from storage and attach pools
+    let tokens = tokensWithPools;
+    if (!tokens) {
+      const tokensFromStorage = await this.storageService.getTokensByNetwork(chainId);
+      const poolRegistry = await this.storageService.getPoolRegistry(chainId);
+      tokens = tokensFromStorage.map(token => ({
+        ...token,
+        pricingPools: poolRegistry.pricingRoutes[token.address.toLowerCase()] || [],
+      }));
+    }
 
-    // Fetch market data for each token in parallel
+    // HOT PATH INTEGRATION:
+    // 1. Notify PoolController of token interest (deduplicates to pools)
+    poolController.handleTokenInterest(tokens);
+    
+    // 2. Start scheduler if needed
+    await this.startSchedulerIfNeeded();
+
+    // Fetch market data for each token in parallel with error handling
     const marketDataPromises = tokens.map(token =>
-      this.getTokenMarketData(token.address, chainId)
+      this.getTokenMarketData(token.address, chainId).catch(error => {
+        console.error(`Error fetching market data for ${token.symbol}:`, error.message);
+        // Return token with insufficient data on error
+        return {
+          address: token.address,
+          symbol: token.symbol,
+          name: token.name,
+          decimals: token.decimals,
+          chainId,
+          price: 0,
+          priceChange24h: 0,
+          liquidity: 0,
+          volume24h: 0,
+          holders: 0,
+          dataSource: 'insufficient-data' as const,
+          timestamp: Date.now(),
+          cachedUntil: Date.now() + this.DEFAULT_CACHE_TTL,
+        };
+      })
     );
 
     const marketDataResults = await Promise.all(marketDataPromises);

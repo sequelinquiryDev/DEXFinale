@@ -11,9 +11,19 @@ export class DiscoveryService {
     private readonly ethersAdapter: EthersAdapter,
   ) {}
 
+  // Add delay between RPC calls to avoid rate limiting
+  private async delay(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+
   async discoverAndPrimeCache(): Promise<void> {
     console.log('Starting pool and token discovery to prime the cache...');
-    const tokens: Token[] = await this.storageService.getTokens();
+    console.log('⚠️  NOTE: This may take a few minutes due to RPC rate limiting');
+    
+    // Get all tokens from all networks (both Ethereum and Polygon)
+    const ethTokens: Token[] = await this.storageService.getTokensByNetwork(1);
+    const polygonTokens: Token[] = await this.storageService.getTokensByNetwork(137);
+    const tokens = [...ethTokens, ...polygonTokens];
 
     // 1. Prime Token Metadata
     for (const token of tokens) {
@@ -76,6 +86,8 @@ export class DiscoveryService {
                   fee
                 );
               }
+              // Add delay between RPC calls to avoid rate limiting
+              await this.delay(100);
             } catch (error: any) {
               // It's common for pools not to exist, so we can log this less verbosely
               // console.log(`Info: Pool not found for ${tokenA.symbol}-${tokenB.symbol} with fee ${fee}`);
@@ -134,25 +146,28 @@ export class DiscoveryService {
     // Add to registry
     registry.pools[poolAddress] = poolMetadata;
 
-    // Create pricing routes (static, deterministic)
+    // Create pricing routes (static, deterministic) with NORMALIZED (lowercase) keys
     // For now: each token routes through this pool to the other token
     // In production, routes would be more sophisticated (multi-hop, base selection)
 
-    if (!registry.pricingRoutes[token0]) {
-      registry.pricingRoutes[token0] = [];
+    const token0Lower = token0.toLowerCase();
+    const token1Lower = token1.toLowerCase();
+
+    if (!registry.pricingRoutes[token0Lower]) {
+      registry.pricingRoutes[token0Lower] = [];
     }
-    if (!registry.pricingRoutes[token1]) {
-      registry.pricingRoutes[token1] = [];
+    if (!registry.pricingRoutes[token1Lower]) {
+      registry.pricingRoutes[token1Lower] = [];
     }
 
     // Add route from token0 to token1
-    registry.pricingRoutes[token0].push({
+    registry.pricingRoutes[token0Lower].push({
       pool: poolAddress,
       base: token1,
     });
 
     // Add route from token1 to token0
-    registry.pricingRoutes[token1].push({
+    registry.pricingRoutes[token1Lower].push({
       pool: poolAddress,
       base: token0,
     });

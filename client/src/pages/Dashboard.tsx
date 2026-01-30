@@ -14,7 +14,9 @@ export default function Dashboard() {
   }>({
     queryKey: ['tokens', selectedNetwork],
     queryFn: async () => {
-      const res = await fetch(api.tokens.getAll.path);
+      const url = new URL(api.tokens.getAll.path, window.location.origin);
+      url.searchParams.append('chainId', String(selectedNetwork));
+      const res = await fetch(url.toString());
       if (!res.ok) {
         throw new Error(`HTTP ${res.status}: ${res.statusText}`);
       }

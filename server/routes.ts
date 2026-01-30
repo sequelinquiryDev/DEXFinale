@@ -21,8 +21,17 @@ export async function registerRoutes(
       // Get chainId from query parameter (default to Polygon if not specified)
       const chainId = req.query.chainId ? Number(req.query.chainId) : 137;
       
+      // COLD PATH: Fetch tokens and attach pool metadata
       const tokens = await app.locals.storageService.getTokensByNetwork(chainId);
-      res.json({ tokens, chainId });
+      const poolRegistry = await app.locals.storageService.getPoolRegistry(chainId);
+      
+      // Attach pricing pools to each token (cold path responsibility)
+      const tokensWithPools = tokens.map(token => ({
+        ...token,
+        pricingPools: poolRegistry.pricingRoutes[token.address.toLowerCase()] || [],
+      }));
+      
+      res.json({ tokens: tokensWithPools, chainId });
     } catch (error) {
       console.error(error);
       res.status(500).json({ message: "Internal server error" });
