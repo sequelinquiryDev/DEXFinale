@@ -2,14 +2,16 @@
  * ProvidersConfig - Centralized API Provider Configuration
  * 
  * SINGLE SOURCE OF TRUTH for all external API calls:
- * - RPC Providers (Infura, Alchemy, Polygon)
+ * - RPC Providers (Infura, Alchemy)
  * - Block Explorer APIs (Etherscan, PolygonScan)
  * - Data Sources for Market Viewer and Swapper
  * 
  * API CALL SOURCES:
- * - Infura: RPC calls, JSON-RPC endpoints
- * - Alchemy: Enhanced RPC, token metadata
- * - Etherscan: Token info, transaction history
+ * - Infura: RPC calls HOT PATH ONLY
+ * - Alchemy: RPC calls HOT PATH ONLY
+ * - Etherscan: COLD PATH API
+ * - PolygonScan: COLD PATH API
+ * 
  * - Public RPCs: Fallback endpoints
  * 
  * SWITCHING ENDPOINTS:
@@ -17,7 +19,7 @@
  * No other files need modification.
  */
 
-interface ProviderEndpoints {
+interface ProviderEndpoints { //fix tbis//
   rpc: string;
   etherscan: string;
   alchemy?: string;
@@ -28,6 +30,9 @@ interface ChainProviders {
   [chainId: number]: ProviderEndpoints;
 }
 
+import { rpcConfig } from './RpcConfig';
+import { explorerConfig } from './ExplorerConfig';
+
 class ProvidersConfig {
   private static instance: ProvidersConfig;
   
@@ -35,37 +40,21 @@ class ProvidersConfig {
   private infuraApiKey: string;
   private alchemyApiKey: string;
   private etherscanApiKey: string;
+  private polygonscanApiKey: string;
   private polygonRpcUrl: string;
 
-  // Provider endpoints per chain
-  private chainProviders: ChainProviders;
+  // ProvidersConfig is a thin facade that delegates to `rpcConfig` and `explorerConfig`.
+  // It preserves the public API for backwards compatibility.
 
   private constructor() {
-    // Load from environment variables
+    // Load from environment variables (for status reporting)
     this.infuraApiKey = process.env.INFURA_API_KEY || '84842078b09946638c03157f83405213';
     this.alchemyApiKey = process.env.ALCHEMY_API_KEY || 'demo';
     this.etherscanApiKey = process.env.ETHERSCAN_API_KEY || 'demo';
-    this.polygonApiKey = process.env.POLYGON_API_KEY || 'demo'; //WE ALREADY HAVE THESE IM THEIR RESPECTIVE CONFIG FILES. WHAT ARE YOU DUPLICATING THIS FOR?
+    this.polygonscanApiKey = process.env.POLYGONSCAN_API_KEY || process.env.POLYGON_API_KEY || 'demo';
+    this.polygonRpcUrl = process.env.POLYGON_RPC_URL || 'https://polygon-rpc.com';
 
-    // Initialize chain providers
-    this.chainProviders = {
-      // Ethereum Mainnet (Chain ID: 1)
-      1: {
-        rpc: `https://mainnet.infura.io/v3/${this.infuraApiKey}`,
-        alchemy: `https://eth-mainnet.g.alchemy.com/v2/${this.alchemyApiKey}`,
-        etherscan: `https://api.etherscan.io/api?apikey=${this.etherscanApiKey}`,
-        fallbackRpc: `https://eth-mainnet.alchemyapi.io/v2/${this.alchemyApiKey}`,
-      },
-      
-      // Polygon (Chain ID: 137)
-      137: {
-        rpc: this.polygonRpcUrl,
-        alchemy: `https://polygon-mainnet.g.alchemy.com/v2/${this.alchemyApiKey}`,
-        etherscan: `https://api.polygonscan.com/api?apikey=${this.etherscanApiKey}`,
-        fallbackRpc: 'https://polygon-rpc.com',
-      },
-    };
-
+    // NOTE: ProvidersConfig delegates runtime resolution to RpcConfig and ExplorerConfig.
     this.logInitialization();
   }
 
@@ -85,11 +74,25 @@ class ProvidersConfig {
    * @returns Primary RPC endpoint
    */
   public getRpcProvider(chainId: number): string {
-    const provider = this.chainProviders[chainId];
-    if (!provider) {
+    // Prefer named provider (Infura) for backward compatibility
+    try {
+      return rpcConfig.getRpcEndpointFromProvider('Infura', chainId);
+    } catch (e) {
+      // Fallback to first available endpoint
+      const endpoints = rpcConfig.getEndpointsForChain(chainId);
+      if (endpoints && endpoints.length > 0) {
+        return endpoints[0].endpoint;
+      }
+
+      // Last-resort fallbacks
+      if (chainId === 1) {
+        return `https://mainnet.infura.io/v3/${this.infuraApiKey}`;
+      } else if (chainId === 137) {
+        return this.polygonRpcUrl;
+      }
+
       throw new Error(`No RPC provider configured for chain ${chainId}`);
     }
-    return provider.rpc;
   }
 
   /**
@@ -98,11 +101,23 @@ class ProvidersConfig {
    * @returns Fallback RPC endpoint
    */
   public getFallbackRpcProvider(chainId: number): string {
-    const provider = this.chainProviders[chainId];
-    if (!provider) {
-      throw new Error(`No fallback RPC provider configured for chain ${chainId}`);
+    const endpoints = rpcConfig.getEndpointsForChain(chainId);
+    if (endpoints && endpoints.length > 1) {
+      return endpoints[1].endpoint;
     }
-    return provider.fallbackRpc;
+    if (endpoints && endpoints.length === 1) {
+      return endpoints[0].endpoint;
+    }
+
+    // Chain-specific fallback
+    if (chainId === 137) {
+      return this.polygonRpcUrl;
+    }
+    if (chainId === 1) {
+      return `https://eth-mainnet.alchemyapi.io/v2/${this.alchemyApiKey}`;
+    }
+
+    throw new Error(`No fallback RPC provider configured for chain ${chainId}`);
   }
 
   /**
@@ -111,11 +126,13 @@ class ProvidersConfig {
    * @returns Alchemy RPC endpoint
    */
   public getAlchemyProvider(chainId: number): string | undefined {
-    const provider = this.chainProviders[chainId];
-    if (!provider) {
-      throw new Error(`No Alchemy provider configured for chain ${chainId}`);
+    try {
+      return rpcConfig.getRpcEndpointFromProvider('Alchemy', chainId);
+    } catch (e) {
+      const endpoints = rpcConfig.getEndpointsForChain(chainId);
+      const match = endpoints.find(e => e.provider === 'Alchemy');
+      return match ? match.endpoint : undefined;
     }
-    return provider.alchemy;
   }
 
   /**
@@ -124,11 +141,17 @@ class ProvidersConfig {
    * @returns Etherscan API endpoint
    */
   public getEtherscanApi(chainId: number): string {
-    const provider = this.chainProviders[chainId];
-    if (!provider) {
+    try {
+      return explorerConfig.getExplorerApiUrl(chainId);
+    } catch (e) {
+      // Fallback to legacy constructed endpoints
+      if (chainId === 1) {
+        return `https://api.etherscan.io/api?apikey=${this.etherscanApiKey}`;
+      } else if (chainId === 137) {
+        return `https://api.polygonscan.com/api?apikey=${this.polygonscanApiKey}`;
+      }
       throw new Error(`No Etherscan API configured for chain ${chainId}`);
     }
-    return provider.etherscan;
   }
 
   /**
@@ -137,11 +160,12 @@ class ProvidersConfig {
    * @returns All configured endpoints for the chain
    */
   public getChainProviders(chainId: number): ProviderEndpoints {
-    const provider = this.chainProviders[chainId];
-    if (!provider) {
-      throw new Error(`No providers configured for chain ${chainId}`);
-    }
-    return provider;
+    return {
+      rpc: this.getRpcProvider(chainId),
+      alchemy: this.getAlchemyProvider(chainId),
+      etherscan: this.getEtherscanApi(chainId),
+      fallbackRpc: this.getFallbackRpcProvider(chainId),
+    };
   }
 
   /**
@@ -149,7 +173,10 @@ class ProvidersConfig {
    * @returns Array of supported chain IDs
    */
   public getSupportedChains(): number[] {
-    return Object.keys(this.chainProviders).map(Number);
+    const rpcChains = Object.keys(rpcConfig.getStatus().counters).map(Number);
+    const explorerChains = explorerConfig.getSupportedChains();
+    const union = new Set<number>([...rpcChains, ...explorerChains]);
+    return Array.from(union).sort((a, b) => a - b);
   }
 
   /**
@@ -158,7 +185,7 @@ class ProvidersConfig {
    * @returns True if chain is supported
    */
   public isChainSupported(chainId: number): boolean {
-    return chainId in this.chainProviders;
+    return this.getSupportedChains().includes(chainId);
   }
 
   /**
@@ -180,15 +207,19 @@ class ProvidersConfig {
       warnings.push('ETHERSCAN_API_KEY is using demo key (may have rate limits)');
     }
 
-    if (this.polygonRpcUrl === 'https://polygon-rpc.com') {
-      warnings.push('POLYGON_RPC_URL is using public endpoint (may have rate limits)');
+    if (this.polygonscanApiKey === 'demo') {
+      warnings.push('POLYGON_API_KEY is using demo key (may have rate limits)');
     }
+
+    const rpcStatus = rpcConfig.getStatus();
+    const explorers = explorerConfig.getStatus();
+
+    console.log(`✓ ProvidersConfig: rpc providers: ${rpcStatus.providers.join(', ')}`);
+    console.log(`✓ ProvidersConfig: explorers: ${explorers.explorers.map(e => e.name).join(', ')}`);
 
     if (warnings.length > 0) {
       console.warn('⚠️  ProvidersConfig Warnings:');
       warnings.forEach(w => console.warn(`   - ${w}`));
-    } else {
-      console.log('✓ ProvidersConfig: All API keys configured');
     }
   }
 
@@ -200,12 +231,19 @@ class ProvidersConfig {
     infuraConfigured: boolean;
     alchemyConfigured: boolean;
     etherscanConfigured: boolean;
+    rpcProviders: string[];
+    explorers: { chainId: number; name: string }[];
   } {
+    const rpcStatus = rpcConfig.getStatus();
+    const explorers = explorerConfig.getStatus();
+
     return {
       chains: this.getSupportedChains(),
       infuraConfigured: this.infuraApiKey !== '84842078b09946638c03157f83405213',
       alchemyConfigured: this.alchemyApiKey !== 'demo',
       etherscanConfigured: this.etherscanApiKey !== 'demo',
+      rpcProviders: rpcStatus.providers,
+      explorers: explorers.explorers,
     };
   }
 }
