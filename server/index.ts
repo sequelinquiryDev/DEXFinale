@@ -3,6 +3,8 @@ import { registerRoutes } from './routes.ts';
 import { EthersAdapter } from './infrastructure/adapters/EthersAdapter';
 import { DiscoveryService } from './application/services/DiscoveryService';
 import { StorageService } from './application/services/StorageService';
+import { QuarantineValidator } from './application/services/QuarantineValidator';
+import { GCManager } from './application/services/GCManager';
 import http from 'http';
 import { priceViewerService } from './application/services/PriceViewerService.ts';
 import { sharedStateCache } from './application/services/SharedStateCache.ts';
@@ -66,6 +68,31 @@ const discoveryService = new DiscoveryService(storageService, ethersAdapter);
 })();
 
 const swapController = new SwapController();
+
+// PHASE 7: Initialize and start quarantine validator
+const quarantineValidator = new QuarantineValidator(storageService, ethersAdapter);
+console.log('🔄 PHASE 7: Starting quarantine validator loops...');
+quarantineValidator.startValidationLoop(1); // Ethereum
+quarantineValidator.startValidationLoop(137); // Polygon
+
+// PHASE 8: Initialize and start garbage collection manager
+const gcManager = new GCManager(storageService);
+gcManager.startAllCleanupLoops();
+
+// Graceful shutdown: stop validators and GC
+process.on('SIGTERM', () => {
+  console.log('SIGTERM received, shutting down...');
+  quarantineValidator.stopAllLoops();
+  gcManager.stopAllCleanupLoops();
+  server.close();
+});
+
+process.on('SIGINT', () => {
+  console.log('SIGINT received, shutting down...');
+  quarantineValidator.stopAllLoops();
+  gcManager.stopAllCleanupLoops();
+  server.close();
+});
 
 // Register the routes
 registerRoutes(app, priceViewerService, swapController);

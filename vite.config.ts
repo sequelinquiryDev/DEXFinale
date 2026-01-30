@@ -8,12 +8,12 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 // Use the PORT environment variable provided by the platform, or default to 5173
-const port = process.env.PORT ? parseInt(process.env.PORT, 10);
+const port = process.env.PORT ? parseInt(process.env.PORT, 10) : 5173;
 
 // The backend server will run on a fixed port
 const backendPort = 3002;
 
-export default defineConfig(async () => ({
+export default defineConfig({
   plugins: [
     react(),
     runtimeErrorOverlay(),
@@ -21,8 +21,8 @@ export default defineConfig(async () => ({
     ...(process.env.NODE_ENV !== "production" &&
     process.env.REPL_ID !== undefined
       ? [
-          (await import("@replit/vite-plugin-cartographer")).cartographer(),
-          (await import("@replit/vite-plugin-dev-banner")).devBanner(),
+          require("@replit/vite-plugin-cartographer").cartographer(),
+          require("@replit/vite-plugin-dev-banner").devBanner(),
         ]
       : []),
   ],
@@ -43,11 +43,11 @@ export default defineConfig(async () => ({
     port: port,
     // Listen on all network interfaces, which is required for previews to work
     host: "0.0.0.0",
-    allowedHosts: "all", // accept any host (Replit dynamic URLs)
-      strictPort: false, // optional, avoids port conflicts
-      hmr: {
-        host: process.env.REPL_ID ? `${process.env.REPL_ID}.replit.dev` : "localhost",
-      },
+    middlewareMode: false,
+    strictPort: false, // optional, avoids port conflicts
+    hmr: {
+      host: process.env.REPL_ID ? `${process.env.REPL_ID}.replit.dev` : "localhost",
+    },
     proxy: {
       // Proxy API requests to the backend server
       '/api': {
@@ -60,4 +60,4 @@ export default defineConfig(async () => ({
       deny: ["**/.*"],
     },
   },
-}));
+});

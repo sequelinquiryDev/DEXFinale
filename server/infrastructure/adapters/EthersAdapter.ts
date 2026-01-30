@@ -1,6 +1,7 @@
 import { Pool, Token } from "../../domain/entities";
 import { ethers, BaseContract } from "ethers";
 import { PoolState, TokenMetadata } from "../../domain/types";
+import type { MulticallResult } from "../../application/services/MulticallEngine";
 
 const MULTICALL_ADDRESS = "0xca11bde05977b3631167028862be2a173976ca11";
 const UNISWAP_V3_FACTORY = "0x1F98431c8aD98523631AE4a59f267346ea31F984";
@@ -22,7 +23,9 @@ const FACTORY_ABI = [
 const POOL_ABI = [
   "function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
   "function liquidity() view returns (uint128)",
-  "function fee() view returns (uint24)"
+  "function fee() view returns (uint24)",
+  "function token0() view returns (address)",
+  "function token1() view returns (address)"
 ];
 
 export class EthersAdapter {
@@ -101,4 +104,92 @@ export class EthersAdapter {
 
     return pools;
   }
+
+  /**
+   * PHASE 4: Execute multicall batch
+   * 
+   * Batches pool queries together using Multicall3 contract.
+   * Constructs calls for slot0() + liquidity() on each pool.
+   * Returns block number and decoded results.
+   * 
+   * @param poolAddresses Pool addresses to query
+   * @param providerIndex Which provider to use
+   * @param chainId Network chain ID
+   * @returns Array of results (one per pool)
+   */
+  public async executeMulticall(
+    poolAddresses: string[],
+    providerIndex: number,
+    chainId: number
+  ): Promise<MulticallResult[]> {
+    const provider = this.getProvider(chainId);
+    const multicallContract = new ethers.Contract(MULTICALL_ADDRESS, MULTICALL_ABI, provider);
+
+    // Construct calls for each pool (slot0 + liquidity)
+    const calls = [];
+    for (const poolAddress of poolAddresses) {
+      const poolIface = new ethers.Interface(POOL_ABI);
+
+      // slot0 call
+      calls.push({
+        target: poolAddress,
+        callData: poolIface.encodeFunctionData('slot0', []),
+      });
+
+      // liquidity call
+      calls.push({
+        target: poolAddress,
+        callData: poolIface.encodeFunctionData('liquidity', []),
+      });
+    }
+
+    try {
+      // Execute aggregate call
+      const result = await (multicallContract as any).aggregate(calls);
+      const blockNumber = Number(result.blockNumber);
+      const returnData = result.returnData as string[];
+
+      // Parse results
+      const results: MulticallResult[] = [];
+      const poolIface = new ethers.Interface(POOL_ABI);
+
+      for (let i = 0; i < poolAddresses.length; i++) {
+        const poolAddress = poolAddresses[i];
+        const slot0Index = i * 2;
+        const liquidityIndex = i * 2 + 1;
+
+        try {
+          const slot0Data = returnData[slot0Index];
+          const liquidityData = returnData[liquidityIndex];
+
+          const slot0Decoded = poolIface.decodeFunctionResult('slot0', slot0Data) as any;
+          const liquidityDecoded = poolIface.decodeFunctionResult('liquidity', liquidityData) as any;
+
+          results.push({
+            poolAddress,
+            blockNumber,
+            success: true,
+            data: {
+              sqrtPriceX96: BigInt(slot0Decoded.sqrtPriceX96.toString()),
+              tick: slot0Decoded.tick,
+              liquidity: BigInt(liquidityDecoded.toString()),
+            },
+          });
+        } catch (error) {
+          results.push({
+            poolAddress,
+            blockNumber,
+            success: false,
+            error: error as Error,
+          });
+        }
+      }
+
+      return results;
+    } catch (error) {
+      console.error(`❌ Multicall execution failed:`, error);
+      throw error;
+    }
+  }
 }
+

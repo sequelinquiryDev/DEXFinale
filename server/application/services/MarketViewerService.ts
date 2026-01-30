@@ -171,12 +171,23 @@ class MarketViewerService {
   /**
    * Get tokens for a specific network
    * 
+   * PHASE 1: Attach pool metadata before serving to hot path
+   * 
    * @param chainId Network chain ID
-   * @returns List of tokens
+   * @returns List of tokens with attached pool metadata
    */
   public async getTokensForNetwork(chainId: number) {
     console.log(`📋 Fetching tokens for chain ${chainId}`);
-    return await this.storageService.getTokensByNetwork(chainId);
+    const tokens = await this.storageService.getTokensByNetwork(chainId);
+    
+    // PHASE 1: Attach pool metadata to each token
+    const poolRegistry = await this.storageService.getPoolRegistry(chainId);
+    const tokensWithPools = tokens.map(token => ({
+      ...token,
+      pricingPools: poolRegistry.pricingRoutes[token.address] || [],
+    }));
+
+    return tokensWithPools;
   }
 
   /**
