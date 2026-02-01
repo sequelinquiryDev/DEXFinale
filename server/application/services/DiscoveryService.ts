@@ -4,6 +4,7 @@ import { StorageService } from './StorageService';
 import { Token } from '../../domain/entities';
 import { sharedStateCache } from './SharedStateCache';
 import { PoolState, TokenMetadata, PoolRegistry, PoolMetadata, PricingRoute } from '../../domain/types';
+import { explorerConfig } from '../../infrastructure/config/ExplorerConfig';
 
 export class DiscoveryService {
   constructor(
@@ -18,7 +19,7 @@ export class DiscoveryService {
 
   async discoverAndPrimeCache(): Promise<void> {
     console.log('Starting pool and token discovery to prime the cache...');
-    console.log('⚠️  NOTE: This may take a few minutes due to RPC rate limiting');
+    console.log('🔍 Using Explorer APIs (Cold Path) where available');
     
     // Get all tokens from all networks (both Ethereum and Polygon)
     const ethTokens: Token[] = await this.storageService.getTokensByNetwork(1);

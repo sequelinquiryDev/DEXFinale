@@ -2,6 +2,7 @@ import { Pool, Token } from "../../domain/entities";
 import { ethers, BaseContract } from "ethers";
 import { PoolState, TokenMetadata } from "../../domain/types";
 import type { MulticallResult } from "../../application/services/MulticallEngine";
+import { explorerConfig } from "../config/ExplorerConfig";
 
 const MULTICALL_ADDRESS = "0xca11bde05977b3631167028862be2a173976ca11";
 const UNISWAP_V3_FACTORY = "0x1F98431c8aD98523631AE4a59f267346ea31F984";
@@ -81,6 +82,25 @@ export class EthersAdapter {
   }
 
   async getPoolAddress(tokenA: Token, tokenB: Token, chainId: number, fee: number): Promise<string | null> {
+    try {
+      const explorer = explorerConfig.getExplorer(chainId);
+      if (explorer.apiKey) {
+        const baseUrl = explorer.baseUrl;
+        const factoryAddress = UNISWAP_V3_FACTORY;
+        const url = `${baseUrl}?module=contract&action=read&address=${factoryAddress}&functionname=getPool&inputs=${tokenA.address},${tokenB.address},${fee}&apikey=${explorer.apiKey}`;
+        
+        const response = await fetch(url);
+        const data = await response.json() as any;
+        
+        if (data.status === "1" && data.result && data.result !== "0x0000000000000000000000000000000000000000") {
+          console.log(`✓ Found pool ${data.result.slice(0, 6)}... for ${tokenA.symbol}-${tokenB.symbol} (fee: ${fee}) via Explorer API`);
+          return data.result;
+        }
+      }
+    } catch (error) {
+      console.warn(`Explorer API pool search failed, falling back to RPC:`, error);
+    }
+
     const provider = this.getProvider(chainId);
     const factory = this.factories[chainId].connect(provider);
     try {
