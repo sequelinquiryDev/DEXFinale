@@ -387,19 +387,25 @@ export class TokenDiscoveryManager {
     }
 
     // Determine base token symbol for this pair
-    // If token1 is a base token, use its symbol; otherwise use token0's symbol
-    let baseSymbol: string;
-    let nonBaseToken: string;
-    let nonBaseSymbol: string;
+    // Priority: token1 first (if base token), then token0 (if base token)
+    // If neither is a base token, we skip this pool (no pricing path)
+    let baseSymbol: string | null = null;
+    let nonBaseToken: string | null = null;
+    let nonBaseSymbol: string | null = null;
 
     if (baseTokenMap.has(token1)) {
       baseSymbol = token1Symbol;
       nonBaseToken = token0;
       nonBaseSymbol = token0Symbol;
-    } else {
+    } else if (baseTokenMap.has(token0)) {
       baseSymbol = token0Symbol;
       nonBaseToken = token1;
       nonBaseSymbol = token1Symbol;
+    }
+
+    // Skip pools where neither token is a base token
+    if (!baseSymbol || !nonBaseToken) {
+      return;
     }
 
     // Add pool to the non-base token's routes under the base token symbol
@@ -408,12 +414,5 @@ export class TokenDiscoveryManager {
       registry.pricingRoutes[nonBaseToken][baseSymbol] = [];
     }
     registry.pricingRoutes[nonBaseToken][baseSymbol].push(poolAddress);
-
-    // Also add reverse route for potential multi-hop scenarios
-    // Example: If pool is RAI/USDC, also add to pricingRoutes[USDC][RAI]
-    if (!registry.pricingRoutes[baseTokenMap.has(token1) ? token1 : token0][nonBaseSymbol]) {
-      registry.pricingRoutes[baseTokenMap.has(token1) ? token1 : token0][nonBaseSymbol] = [];
-    }
-    registry.pricingRoutes[baseTokenMap.has(token1) ? token1 : token0][nonBaseSymbol].push(poolAddress);
   }
 }
