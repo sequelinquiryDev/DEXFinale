@@ -118,9 +118,10 @@ class SpotPricingEngine {
       // This base is a USD stablecoin, check if any pool is cached
       const poolAddresses = tokenRoutes[baseSymbol];
       for (const poolAddr of poolAddresses) {
-        const pState = sharedStateCache.getPoolState(poolAddr);
+        // ALWAYS use lowercase for cache keys
+        const pState = sharedStateCache.getPoolState(poolAddr.toLowerCase());
         if (pState) {
-          bestPoolAddress = poolAddr;
+          bestPoolAddress = poolAddr.toLowerCase();
           bestBaseSymbol = baseSymbol;
           bestBaseAddress = baseAddress;
           console.log(`✓ [PRICING] ${tokenShort}... found CACHED ${baseSymbol} route (pool: ${poolAddr.slice(0, 6)}...)`);
@@ -139,9 +140,9 @@ class SpotPricingEngine {
       if (tokenRoutes[wethSymbol]) {
         const poolAddresses = tokenRoutes[wethSymbol];
         for (const poolAddr of poolAddresses) {
-          const pState = sharedStateCache.getPoolState(poolAddr);
+          const pState = sharedStateCache.getPoolState(poolAddr.toLowerCase());
           if (pState) {
-            bestPoolAddress = poolAddr;
+            bestPoolAddress = poolAddr.toLowerCase();
             bestBaseSymbol = wethSymbol;
             bestBaseAddress = symbolMap.get(wethSymbol) || null;
             console.log(`⚠️ [PRICING] ${tokenShort}... using WETH route (pool: ${poolAddr.slice(0, 6)}..., will recurse)`);
@@ -162,9 +163,9 @@ class SpotPricingEngine {
 
         const poolAddresses = tokenRoutes[baseSymbol];
         for (const poolAddr of poolAddresses) {
-          const pState = sharedStateCache.getPoolState(poolAddr);
+          const pState = sharedStateCache.getPoolState(poolAddr.toLowerCase());
           if (pState) {
-            bestPoolAddress = poolAddr;
+            bestPoolAddress = poolAddr.toLowerCase();
             bestBaseSymbol = baseSymbol;
             bestBaseAddress = baseAddress;
             console.log(`⚠️ [PRICING] ${tokenShort}... using ${baseSymbol} route (will recurse)`);

@@ -297,16 +297,19 @@ export class PoolScheduler {
             console.log(`✓ [CACHE] Pool ${result.poolAddress.slice(0, 6)}... cached (sqrtPrice: ${result.data.sqrtPriceX96.toString().slice(0, 16)}...)`);
 
             // PHASE 6: Update SharedStateCache for pricing engines
-            sharedStateCache.setPoolState(result.poolAddress, {
-              address: result.poolAddress,
-              token0: result.data.token0,
-              token1: result.data.token1,
+            const poolKey = result.poolAddress.toLowerCase();
+            const poolStateData = {
+              address: poolKey,
+              token0: result.data.token0.toLowerCase(),
+              token1: result.data.token1.toLowerCase(),
               sqrtPriceX96: BigInt(result.data.sqrtPriceX96.toString()),
               liquidity: BigInt(result.data.liquidity.toString()),
               tickId: tickId,
               blockNumber: result.blockNumber,
               lastUpdate: Date.now()
-            } as any);
+            };
+            sharedStateCache.setPoolState(poolKey, poolStateData as any);
+            console.log(`✅ [CACHE] Updated state for ${poolKey.slice(0, 6)} (tick: ${tickId})`);
 
             // Update pool tier based on price change
             if (pool) {

@@ -204,33 +204,46 @@ export class EthersAdapter {
     const multicallContract = new ethers.Contract(multicallAddress, MULTICALL_ABI, provider);
 
     // Construct calls for each pool (slot0 + liquidity + token0 + token1)
-    const calls: { target: string; callData: string }[] = [];
+    const calls: any[] = [];
+    const poolIface = new ethers.Interface(POOL_ABI);
+    
     for (const poolAddress of poolAddresses) {
-      const poolIface = new ethers.Interface(POOL_ABI);
-
+      // ENSURE valid address before construction
+      let target: string;
+      try {
+        target = ethers.getAddress(poolAddress);
+      } catch {
+        console.warn(`⚠️ Invalid pool address in multicall: ${poolAddress}`);
+        continue;
+      }
+      
       // slot0 call
-      calls.push({
-        target: poolAddress,
-        callData: poolIface.encodeFunctionData('slot0', []),
-      });
+      calls.push([
+        target,
+        poolIface.encodeFunctionData('slot0', [])
+      ]);
 
       // liquidity call
-      calls.push({
-        target: poolAddress,
-        callData: poolIface.encodeFunctionData('liquidity', []),
-      });
+      calls.push([
+        target,
+        poolIface.encodeFunctionData('liquidity', [])
+      ]);
 
       // token0 call
-      calls.push({
-        target: poolAddress,
-        callData: poolIface.encodeFunctionData('token0', []),
-      });
+      calls.push([
+        target,
+        poolIface.encodeFunctionData('token0', [])
+      ]);
 
       // token1 call
-      calls.push({
-        target: poolAddress,
-        callData: poolIface.encodeFunctionData('token1', []),
-      });
+      calls.push([
+        target,
+        poolIface.encodeFunctionData('token1', [])
+      ]);
+    }
+
+    if (calls.length === 0) {
+      return [];
     }
 
     try {
