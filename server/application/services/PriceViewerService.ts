@@ -39,7 +39,6 @@ class PriceViewerService {
     chainId: number
   ): Promise<Record<string, number | null>> {
     // PHASE 2: Register token interest with controller
-    // Convert from { pool, base } format to flat pool address array
     const tokensWithPoolAddresses = tokens.map(token => ({
       address: token.address,
       pricingPools: token.pricingPools.map(route => route.pool)
@@ -48,8 +47,13 @@ class PriceViewerService {
 
     // PHASE 6: Collect tickIds from all pools used by these tokens
     const tickIds = new Set<string>();
-    for (const token of tokens) {
-      for (const poolAddress of tokensWithPoolAddresses.find(t => t.address === token.address)?.pricingPools || []) {
+    const tokensWithPools = tokens.map(token => {
+        const pricingPools = tokensWithPoolAddresses.find(t => t.address === token.address)?.pricingPools || [];
+        return { address: token.address, pricingPools };
+    });
+
+    for (const token of tokensWithPools) {
+      for (const poolAddress of token.pricingPools) {
         const poolState = sharedStateCache.getPoolState(poolAddress);
         if (poolState && poolState.tickId) {
           tickIds.add(poolState.tickId);
@@ -58,6 +62,16 @@ class PriceViewerService {
     }
 
     // PHASE 6: Verify tick consistency - all pools must belong to same refresh cycle
+    // If no pools have ticks yet, they haven't been fetched at least once.
+    if (tickIds.size === 0) {
+        console.log(`ℹ️ PHASE 6: No ticks discovered yet. Waiting for first multicall...`);
+        const nullPrices: Record<string, number | null> = {};
+        for (const token of tokens) {
+          nullPrices[token.address] = null;
+        }
+        return nullPrices;
+    }
+
     if (tickIds.size > 1) {
       console.warn(
         `⚠️ PHASE 6: Mixed tick consistency detected (${tickIds.size} different ticks). ` +
@@ -73,7 +87,9 @@ class PriceViewerService {
     // Compute prices for each token
     const prices: Record<string, number | null> = {};
     for (const token of tokens) {
-      prices[token.address] = await spotPricingEngine.computeSpotPrice(token.address, chainId);
+      const price = await spotPricingEngine.computeSpotPrice(token.address, chainId);
+      console.log(`💰 [PriceViewer] Price for ${token.address.slice(0, 6)}: ${price}`);
+      prices[token.address] = price;
     }
 
     return prices;

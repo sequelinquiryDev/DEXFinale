@@ -108,6 +108,7 @@ class SpotPricingEngine {
     let bestBaseSymbol: string | null = null;
     let bestBaseAddress: string | null = null;
 
+    console.log(`🔍 [PRICING] ${tokenShort}... checking strategy 1 (stablecoin base)`);
     // First, try to find a stablecoin base with a cached pool
     for (const baseSymbol in tokenRoutes) {
       const baseAddress = symbolMap.get(baseSymbol);
@@ -117,7 +118,8 @@ class SpotPricingEngine {
       // This base is a USD stablecoin, check if any pool is cached
       const poolAddresses = tokenRoutes[baseSymbol];
       for (const poolAddr of poolAddresses) {
-        if (sharedStateCache.getPoolState(poolAddr)) {
+        const pState = sharedStateCache.getPoolState(poolAddr);
+        if (pState) {
           bestPoolAddress = poolAddr;
           bestBaseSymbol = baseSymbol;
           bestBaseAddress = baseAddress;
@@ -130,11 +132,13 @@ class SpotPricingEngine {
 
     // Strategy 2: If no stablecoin route with cache, try WETH
     if (!bestPoolAddress) {
+      console.log(`🔍 [PRICING] ${tokenShort}... checking strategy 2 (WETH base)`);
       const wethSymbol = 'WETH';
       if (tokenRoutes[wethSymbol]) {
         const poolAddresses = tokenRoutes[wethSymbol];
         for (const poolAddr of poolAddresses) {
-          if (sharedStateCache.getPoolState(poolAddr)) {
+          const pState = sharedStateCache.getPoolState(poolAddr);
+          if (pState) {
             bestPoolAddress = poolAddr;
             bestBaseSymbol = wethSymbol;
             bestBaseAddress = symbolMap.get(wethSymbol) || null;
@@ -147,13 +151,15 @@ class SpotPricingEngine {
 
     // Strategy 3: Try any route with a cached pool
     if (!bestPoolAddress) {
+      console.log(`🔍 [PRICING] ${tokenShort}... checking strategy 3 (any base)`);
       for (const baseSymbol in tokenRoutes) {
         const baseAddress = symbolMap.get(baseSymbol);
         if (!baseAddress) continue;
 
         const poolAddresses = tokenRoutes[baseSymbol];
         for (const poolAddr of poolAddresses) {
-          if (sharedStateCache.getPoolState(poolAddr)) {
+          const pState = sharedStateCache.getPoolState(poolAddr);
+          if (pState) {
             bestPoolAddress = poolAddr;
             bestBaseSymbol = baseSymbol;
             bestBaseAddress = baseAddress;

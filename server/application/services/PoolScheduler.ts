@@ -301,11 +301,12 @@ export class PoolScheduler {
               address: result.poolAddress,
               token0: result.data.token0,
               token1: result.data.token1,
-              sqrtPriceX96: result.data.sqrtPriceX96.toString(),
-              liquidity: result.data.liquidity.toString(),
-              tick: Number(result.data.tick),
+              sqrtPriceX96: BigInt(result.data.sqrtPriceX96.toString()),
+              liquidity: BigInt(result.data.liquidity.toString()),
+              tickId: tickId,
+              blockNumber: result.blockNumber,
               lastUpdate: Date.now()
-            });
+            } as any);
 
             // Update pool tier based on price change
             if (pool) {
