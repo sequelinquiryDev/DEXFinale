@@ -13,8 +13,6 @@
  * This enables deduplication when N tokens share M pools.
  */
 
-import { PricingRoute } from '../../domain/types';
-
 /**
  * Per-pool liveness and scheduling metadata
  */
@@ -41,26 +39,25 @@ export class PoolController {
    * PHASE 2: Handle token interest requests
    * 
    * When UI requests prices for a set of tokens, this method:
-   * 1. Extracts pricing routes from each token's metadata
-   * 2. For each route, adds pool to alive set (or increments refCount)
+   * 1. Extracts pool addresses from each token's metadata
+   * 2. For each pool, adds pool to alive set (or increments refCount)
    * 3. Deduplicates pools automatically (Map prevents duplicates)
    * 
    * Result: N token requests → M pool tracking entries (M ≤ N)
    * 
-   * @param tokens Array of tokens with attached pricingPools metadata
+   * @param tokens Array of tokens with attached pricingPools pool addresses
    * @param chainId Chain ID for the pools
    */
   public handleTokenInterest(
     tokens: Array<{ 
       address: string;
-      pricingPools: PricingRoute[]
+      pricingPools: string[] // Pool addresses instead of PricingRoute objects
     }>,
     chainId: number = 1
   ): void {
     for (const token of tokens) {
-      // Each token may have multiple pricing routes (e.g., 2-hop pricing)
-      for (const route of token.pricingPools) {
-        const poolAddress = route.pool;
+      // Each token may have multiple pools for pricing (e.g., 2-hop pricing)
+      for (const poolAddress of token.pricingPools) {
         // Use chainId-prefixed key to avoid collisions between chains
         const poolKey = `${chainId}:${poolAddress}`;
 

@@ -5,6 +5,53 @@ import type { MulticallResult } from "../../application/services/MulticallEngine
 import { explorerConfig } from "../config/ExplorerConfig";
 import { getContractAddress } from "../config/ContractAddressConfig";
 
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1000;
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function withRetry<T>(
+  fn: () => Promise<T>,
+  context: string,
+  maxRetries = MAX_RETRIES
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error: any) {
+      lastError = error;
+      const isRateLimited = 
+        error?.info?.error?.code === 429 ||
+        error?.code === 429 ||
+        error?.message?.includes('429') ||
+        error?.message?.includes('rate limit') ||
+        error?.message?.includes('compute units');
+      
+      if (isRateLimited && attempt < maxRetries - 1) {
+        const delayMs = BASE_DELAY_MS * Math.pow(2, attempt);
+        console.warn(`⏳ Rate limited (${context}), retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+        await sleep(delayMs);
+        continue;
+      }
+      
+      if (attempt < maxRetries - 1 && error?.code === 'CALL_EXCEPTION') {
+        const delayMs = BASE_DELAY_MS * Math.pow(2, attempt);
+        console.warn(`⏳ Call exception (${context}), retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetries})`);
+        await sleep(delayMs);
+        continue;
+      }
+      
+      throw error;
+    }
+  }
+  
+  throw lastError;
+}
+
 const ERC20_ABI = [
     "function name() view returns (string)",
     "function symbol() view returns (string)",
@@ -51,33 +98,37 @@ export class EthersAdapter {
   }
 
   async getTokenMetadata(tokenAddress: string, chainId: number): Promise<TokenMetadata> {
-    const provider = this.getProvider(chainId);
-    const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
-    const [name, symbol, decimals] = await Promise.all([
-        tokenContract.name(),
-        tokenContract.symbol(),
-        tokenContract.decimals(),
-    ]);
-    return { name, symbol, decimals };
+    return withRetry(async () => {
+      const provider = this.getProvider(chainId);
+      const tokenContract = new ethers.Contract(tokenAddress, ERC20_ABI, provider);
+      const [name, symbol, decimals] = await Promise.all([
+          tokenContract.name(),
+          tokenContract.symbol(),
+          tokenContract.decimals(),
+      ]);
+      return { name, symbol, decimals };
+    }, `getTokenMetadata(${tokenAddress.slice(0, 8)})`);
   }
 
   async getPoolState(poolAddress: string, chainId: number): Promise<PoolState> {
-    const provider = this.getProvider(chainId);
-    const poolContract = new ethers.Contract(poolAddress, POOL_ABI, provider);
-    const slot0 = await poolContract.slot0();
-    const liquidity = await poolContract.liquidity();
-    const token0 = await poolContract.token0();
-    const token1 = await poolContract.token1();
-    const fee = await poolContract.fee();
-    return {
-        address: poolAddress,
-        liquidity: BigInt(liquidity.toString()),
-        sqrtPriceX96: BigInt(slot0.sqrtPriceX96.toString()),
-        token0,
-        token1,
-        fee,
-        timestamp: Math.floor(Date.now() / 1000),
-    };
+    return withRetry(async () => {
+      const provider = this.getProvider(chainId);
+      const poolContract = new ethers.Contract(poolAddress, POOL_ABI, provider);
+      const slot0 = await poolContract.slot0();
+      const liquidity = await poolContract.liquidity();
+      const token0 = await poolContract.token0();
+      const token1 = await poolContract.token1();
+      const fee = await poolContract.fee();
+      return {
+          address: poolAddress,
+          liquidity: BigInt(liquidity.toString()),
+          sqrtPriceX96: BigInt(slot0.sqrtPriceX96.toString()),
+          token0,
+          token1,
+          fee,
+          timestamp: Math.floor(Date.now() / 1000),
+      };
+    }, `getPoolState(${poolAddress.slice(0, 8)})`);
   }
 
   async getPoolAddress(tokenA: Token, tokenB: Token, chainId: number, fee: number): Promise<string | null> {
@@ -153,38 +204,54 @@ export class EthersAdapter {
     const multicallContract = new ethers.Contract(multicallAddress, MULTICALL_ABI, provider);
 
     // Construct calls for each pool (slot0 + liquidity + token0 + token1)
-    const calls = [];
+    const calls: any[] = [];
+    const poolIface = new ethers.Interface(POOL_ABI);
+    
     for (const poolAddress of poolAddresses) {
-      const poolIface = new ethers.Interface(POOL_ABI);
-
+      // ENSURE valid address before construction
+      let target: string;
+      try {
+        target = ethers.getAddress(poolAddress);
+      } catch {
+        console.warn(`⚠️ Invalid pool address in multicall: ${poolAddress}`);
+        continue;
+      }
+      
       // slot0 call
-      calls.push({
-        target: poolAddress,
-        callData: poolIface.encodeFunctionData('slot0', []),
-      });
+      calls.push([
+        target,
+        poolIface.encodeFunctionData('slot0', [])
+      ]);
 
       // liquidity call
-      calls.push({
-        target: poolAddress,
-        callData: poolIface.encodeFunctionData('liquidity', []),
-      });
+      calls.push([
+        target,
+        poolIface.encodeFunctionData('liquidity', [])
+      ]);
 
       // token0 call
-      calls.push({
-        target: poolAddress,
-        callData: poolIface.encodeFunctionData('token0', []),
-      });
+      calls.push([
+        target,
+        poolIface.encodeFunctionData('token0', [])
+      ]);
 
       // token1 call
-      calls.push({
-        target: poolAddress,
-        callData: poolIface.encodeFunctionData('token1', []),
-      });
+      calls.push([
+        target,
+        poolIface.encodeFunctionData('token1', [])
+      ]);
+    }
+
+    if (calls.length === 0) {
+      return [];
     }
 
     try {
-      // Execute aggregate call
-      const result = await (multicallContract as any).aggregate(calls);
+      // Execute aggregate call with retry logic for rate limiting
+      const result = await withRetry(
+        async () => (multicallContract as any).aggregate(calls),
+        `multicall(${poolAddresses.length} pools)`
+      );
       const blockNumber = Number(result.blockNumber);
       const returnData = result.returnData as string[];
 

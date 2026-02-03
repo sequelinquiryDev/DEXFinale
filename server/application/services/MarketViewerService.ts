@@ -124,6 +124,7 @@ class MarketViewerService {
     }
 
     const price = await spotPricingEngine.computeSpotPrice(tokenAddress, chainId);
+    console.log(`[LOG-MARKET-DATA] Token ${tokenAddress.slice(0, 6)}... got price from engine: ${price}`);
 
     const hasValidPrice = price !== null && price > 0;
     const marketData: TokenMarketData = {
@@ -182,10 +183,18 @@ class MarketViewerService {
 
     // 2. Attach pricing pools to each token.
     const poolRegistry = await this.cacheLayer.getPoolRegistryCached(chainId);
-    const tokensWithPools = requestedTokens.map(token => ({
-      ...token,
-      pricingPools: poolRegistry.pricingRoutes[token.address.toLowerCase()] || [],
-    }));
+    const tokensWithPools = requestedTokens.map(token => {
+      // Flatten the nested pricingRoutes structure into a single array of pool addresses
+      const tokenRoutes = poolRegistry.pricingRoutes[token.address.toLowerCase()] || {};
+      const flattenedPools: string[] = [];
+      for (const baseSymbol in tokenRoutes) {
+        flattenedPools.push(...tokenRoutes[baseSymbol]);
+      }
+      return {
+        ...token,
+        pricingPools: flattenedPools,
+      };
+    });
 
     // 3. Notify PoolController of token interest.
     poolController.handleTokenInterest(tokensWithPools, chainId);
@@ -215,6 +224,8 @@ class MarketViewerService {
     );
 
     const marketDataResults = await Promise.all(marketDataPromises);
+    console.log(`[LOG-MARKET-OVERVIEW] Computed prices for ${marketDataResults.length} tokens`);
+    console.log(`[LOG-MARKET-OVERVIEW] Results summary: ${marketDataResults.map(t => `${t.symbol}=${t.price}`).join(', ')}`);
 
     const totalLiquidity = marketDataResults.reduce((sum: number, t: TokenMarketData) => sum + (t.liquidity || 0), 0);
     const totalVolume24h = marketDataResults.reduce((sum: number, t: TokenMarketData) => sum + (t.volume24h || 0), 0);

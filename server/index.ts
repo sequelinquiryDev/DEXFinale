@@ -21,6 +21,7 @@ import { SwapController } from './application/services/SwapController.ts';
 import { providersConfig } from './infrastructure/config/ProvidersConfig';
 import { getRpcConfig } from './infrastructure/config/RpcConfig';
 import { explorerConfig } from './infrastructure/config/ExplorerConfig';
+import { initSpotPricingEngine } from './application/services/SpotPricingEngine.ts';
 
 // Reinitialize config modules with loaded env vars
 const rpcConfig = getRpcConfig();
@@ -63,6 +64,9 @@ try {
 
 const ethersAdapter = new EthersAdapter(rpcProviders);
 const storageService = new StorageService();
+
+// Initialize SpotPricingEngine with ethersAdapter
+initSpotPricingEngine(ethersAdapter);
 
 app.locals.storageService = storageService;
 app.locals.ethersAdapter = ethersAdapter;
