@@ -12,7 +12,7 @@
 
 import { StorageService } from './StorageService';
 import { Token } from '../../domain/entities';
-import { PoolRegistry, PoolMetadata, PricingRoute } from '../../domain/types';
+import { PoolRegistry, PoolMetadata } from '../../domain/types';
 import { getSubgraphConfig, BASE_TOKENS, SubgraphConfig } from '../../infrastructure/config/SubgraphConfig';
 import { timingConfig } from '../../infrastructure/config/TimingConfig';
 
@@ -73,6 +73,26 @@ export class TokenDiscoveryManager {
       poolRegistry.topologyTimestamp = {};
     }
 
+    // Build a map of base token addresses to symbols for quick lookup
+    const baseTokenAddresses = BASE_TOKENS[chainId] || [];
+    const baseTokenMap = new Map<string, string>();
+    
+    // Load all tokens to build symbol lookup
+    const allTokens = await this.storageService.getTokensByNetwork(chainId);
+    const tokenSymbolMap = new Map<string, string>();
+    for (const token of allTokens) {
+      tokenSymbolMap.set(token.address.toLowerCase(), token.symbol);
+    }
+    
+    // Populate baseTokenMap: address -> symbol
+    for (const baseAddr of baseTokenAddresses) {
+      const baseAddrLower = baseAddr.toLowerCase();
+      const symbol = tokenSymbolMap.get(baseAddrLower);
+      if (symbol) {
+        baseTokenMap.set(baseAddrLower, symbol);
+      }
+    }
+
     for (const token of tokens) {
       const attemptKey = `${token.address.toLowerCase()}-${chainId}`;
       
@@ -109,7 +129,7 @@ export class TokenDiscoveryManager {
 
         // Add pools to registry
         for (const pool of rankedPools) {
-          this.addPoolToRegistry(poolRegistry, pool, chainId);
+          this.addPoolToRegistry(poolRegistry, pool, chainId, baseTokenMap);
           poolsFoundForToken++;
           poolsDiscoveredThisBatch++;
         }
@@ -317,18 +337,27 @@ export class TokenDiscoveryManager {
   }
 
   /**
-   * Add a discovered pool to the registry
+   * Add a discovered pool to the registry with per-base-token organization
    * 
-   * Creates pool metadata and pricing routes for both tokens
+   * For a pool pairing tokenA with tokenB (a base token):
+   * - Creates pool metadata
+   * - Stores pool under registry.pricingRoutes[tokenA][baseSymbol] = [...pools]
+   * - Stores pool under registry.pricingRoutes[tokenB][tokenASymbol] = [...pools]
+   * 
+   * This enables efficient lookup: "What pools can price TOKEN using USDC?"
+   * Answer: registry.pricingRoutes[TOKEN]['USDC']
    */
   private addPoolToRegistry(
     registry: PoolRegistry,
     pool: SubgraphPool,
-    chainId: number
+    chainId: number,
+    baseTokenMap: Map<string, string> // Maps token address to symbol (for base tokens)
   ): void {
     const poolAddress = pool.id.toLowerCase();
     const token0 = pool.token0.id.toLowerCase();
     const token1 = pool.token1.id.toLowerCase();
+    const token0Symbol = pool.token0.symbol;
+    const token1Symbol = pool.token1.symbol;
 
     // Determine DEX type (V3 has feeTier)
     const dexType = pool.feeTier ? 'v3' : 'v2';
@@ -344,26 +373,47 @@ export class TokenDiscoveryManager {
       weight,
     };
 
-    // Add to registry
-    registry.pools[poolAddress] = poolMetadata;
+    // Add to registry if not already present
+    if (!registry.pools[poolAddress]) {
+      registry.pools[poolAddress] = poolMetadata;
+    }
 
-    // Create pricing routes
+    // Initialize pricingRoutes entries if needed
     if (!registry.pricingRoutes[token0]) {
-      registry.pricingRoutes[token0] = [];
+      registry.pricingRoutes[token0] = {};
     }
     if (!registry.pricingRoutes[token1]) {
-      registry.pricingRoutes[token1] = [];
+      registry.pricingRoutes[token1] = {};
     }
 
-    // Add routes
-    registry.pricingRoutes[token0].push({
-      pool: poolAddress,
-      base: token1,
-    });
+    // Determine base token symbol for this pair
+    // If token1 is a base token, use its symbol; otherwise use token0's symbol
+    let baseSymbol: string;
+    let nonBaseToken: string;
+    let nonBaseSymbol: string;
 
-    registry.pricingRoutes[token1].push({
-      pool: poolAddress,
-      base: token0,
-    });
+    if (baseTokenMap.has(token1)) {
+      baseSymbol = token1Symbol;
+      nonBaseToken = token0;
+      nonBaseSymbol = token0Symbol;
+    } else {
+      baseSymbol = token0Symbol;
+      nonBaseToken = token1;
+      nonBaseSymbol = token1Symbol;
+    }
+
+    // Add pool to the non-base token's routes under the base token symbol
+    // Example: If pool is RAI/USDC, add pool to pricingRoutes[RAI]['USDC']
+    if (!registry.pricingRoutes[nonBaseToken][baseSymbol]) {
+      registry.pricingRoutes[nonBaseToken][baseSymbol] = [];
+    }
+    registry.pricingRoutes[nonBaseToken][baseSymbol].push(poolAddress);
+
+    // Also add reverse route for potential multi-hop scenarios
+    // Example: If pool is RAI/USDC, also add to pricingRoutes[USDC][RAI]
+    if (!registry.pricingRoutes[baseTokenMap.has(token1) ? token1 : token0][nonBaseSymbol]) {
+      registry.pricingRoutes[baseTokenMap.has(token1) ? token1 : token0][nonBaseSymbol] = [];
+    }
+    registry.pricingRoutes[baseTokenMap.has(token1) ? token1 : token0][nonBaseSymbol].push(poolAddress);
   }
 }

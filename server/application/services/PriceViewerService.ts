@@ -39,13 +39,18 @@ class PriceViewerService {
     chainId: number
   ): Promise<Record<string, number | null>> {
     // PHASE 2: Register token interest with controller
-    poolController.handleTokenInterest(tokens, chainId);
+    // Convert from { pool, base } format to flat pool address array
+    const tokensWithPoolAddresses = tokens.map(token => ({
+      address: token.address,
+      pricingPools: token.pricingPools.map(route => route.pool)
+    }));
+    poolController.handleTokenInterest(tokensWithPoolAddresses, chainId);
 
     // PHASE 6: Collect tickIds from all pools used by these tokens
     const tickIds = new Set<string>();
     for (const token of tokens) {
-      for (const route of token.pricingPools) {
-        const poolState = sharedStateCache.getPoolState(route.pool);
+      for (const poolAddress of tokensWithPoolAddresses.find(t => t.address === token.address)?.pricingPools || []) {
+        const poolState = sharedStateCache.getPoolState(poolAddress);
         if (poolState && poolState.tickId) {
           tickIds.add(poolState.tickId);
         }

@@ -42,28 +42,23 @@ export interface PoolMetadata {
 }
 
 /**
- * Pool Registry Phase 1: Pricing Route
+ * Pool Registry Phase 2: Pricing Routes (Refactored)
  * 
- * Static, pre-indexed route for pricing a token.
- * Deterministic - no runtime pathfinding.
- */
-export interface PricingRoute {
-  pool: string; // Pool address
-  base: string; // Base token (WETH, USDC, etc.)
-}
-
-/**
- * Pool Registry Phase 1: Complete Pool Registry
+ * Nested structure mapping each token to its pricing routes per base token.
+ * For each token, routes are organized by base token (USDC, WETH, etc.).
+ * Each base token maps to an array of pool addresses that form the pricing path.
  * 
- * Network-scoped registry containing:
- * 1. Pool metadata indexed by address
- * 2. Pricing routes indexed by token address
- * 3. Topology timestamp per token for TTL tracking (7 days)
- * 4. Reference count per pool (number of active users)
+ * Example structure:
+ * {
+ *   "0xTokenA": {
+ *     "USDC": ["0xPool1", "0xPool2"],  // Direct TOKEN/USDC pools
+ *     "WETH": ["0xPool3"]               // TOKEN/WETH pools for multi-hop
+ *   }
+ * }
  */
 export interface PoolRegistry {
   pools: Record<string, PoolMetadata>;
-  pricingRoutes: Record<string, PricingRoute[]>;
+  pricingRoutes: Record<string, Record<string, string[]>>; // [tokenAddress][baseSymbol] = poolAddresses[]
   topologyTimestamp?: Record<string, number>; // Timestamp (ms) when token topology was last refreshed
   refCount?: Record<string, number>; // Per-pool user count (poolAddress -> count)
 }

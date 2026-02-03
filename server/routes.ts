@@ -102,11 +102,16 @@ export async function registerRoutes(
         const tokenLower = token.address?.toLowerCase();
         if (!tokenLower) return { ...token, pricingPools: [] };
         
-        const pools = poolRegistry?.pricingRoutes?.[tokenLower] || [];
-        console.log(`   Token ${startIndex + paginatedTokens.indexOf(token) + 1}: ${(token.symbol || 'N/A').padEnd(6)} ${token.address.slice(0,8)}... → ${pools.length} pricing route(s)`);
+        // Flatten the nested pricingRoutes structure into a single array of pool addresses
+        const tokenRoutes = poolRegistry?.pricingRoutes?.[tokenLower] || {};
+        const flattenedPools: string[] = [];
+        for (const baseSymbol in tokenRoutes) {
+          flattenedPools.push(...tokenRoutes[baseSymbol]);
+        }
+        console.log(`   Token ${startIndex + paginatedTokens.indexOf(token) + 1}: ${(token.symbol || 'N/A').padEnd(6)} ${token.address.slice(0,8)}... → ${flattenedPools.length} pool(s)`);
         return {
           ...token,
-          pricingPools: pools,
+          pricingPools: flattenedPools,
         };
       }).filter(Boolean);
       
@@ -289,12 +294,16 @@ export async function registerRoutes(
       let totalPoolsIncremented = 0;
       for (const tokenAddr of tokenAddresses) {
         const tokenLower = tokenAddr.toLowerCase();
-        const routes = poolRegistry.pricingRoutes[tokenLower] || [];
+        const tokenRoutes = poolRegistry.pricingRoutes[tokenLower] || {};
         
-        for (const route of routes) {
-          // PoolController.incrementRefCount handles the tracking
-          poolController.incrementRefCount(route.pool, chainId);
-          totalPoolsIncremented++;
+        // Flatten the nested structure to get all pool addresses for this token
+        for (const baseSymbol in tokenRoutes) {
+          const poolAddresses = tokenRoutes[baseSymbol];
+          for (const poolAddress of poolAddresses) {
+            // PoolController.incrementRefCount handles the tracking
+            poolController.incrementRefCount(poolAddress, chainId);
+            totalPoolsIncremented++;
+          }
         }
       }
 

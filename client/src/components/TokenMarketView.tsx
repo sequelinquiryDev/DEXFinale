@@ -158,10 +158,22 @@ export function TokenMarketView({ tokens, chainId, onAddToken, isAddingToken }: 
             ) : (
               displayTokens.map((token) => (
                 <Card key={token.address} className="p-4 hover:shadow-lg transition">
-                  <div className="flex justify-between items-start mb-2">
-                    <div>
-                      <p className="font-bold text-lg">{token.symbol}</p>
-                      <p className="text-sm text-gray-600">{token.name}</p>
+                  <div className="flex justify-between items-start mb-3">
+                    <div className="flex items-center gap-3 flex-1">
+                      {token.logoURI && (
+                        <img 
+                          src={token.logoURI} 
+                          alt={token.symbol} 
+                          className="w-10 h-10 rounded-full object-cover"
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).style.display = 'none';
+                          }}
+                        />
+                      )}
+                      <div>
+                        <p className="font-bold text-lg">{token.symbol}</p>
+                        <p className="text-sm text-gray-600">{token.name}</p>
+                      </div>
                     </div>
                     {token.priceChange24h !== undefined && (
                       <div className={`text-sm font-semibold ${(token.priceChange24h || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>

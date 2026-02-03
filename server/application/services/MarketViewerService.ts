@@ -182,10 +182,18 @@ class MarketViewerService {
 
     // 2. Attach pricing pools to each token.
     const poolRegistry = await this.cacheLayer.getPoolRegistryCached(chainId);
-    const tokensWithPools = requestedTokens.map(token => ({
-      ...token,
-      pricingPools: poolRegistry.pricingRoutes[token.address.toLowerCase()] || [],
-    }));
+    const tokensWithPools = requestedTokens.map(token => {
+      // Flatten the nested pricingRoutes structure into a single array of pool addresses
+      const tokenRoutes = poolRegistry.pricingRoutes[token.address.toLowerCase()] || {};
+      const flattenedPools: string[] = [];
+      for (const baseSymbol in tokenRoutes) {
+        flattenedPools.push(...tokenRoutes[baseSymbol]);
+      }
+      return {
+        ...token,
+        pricingPools: flattenedPools,
+      };
+    });
 
     // 3. Notify PoolController of token interest.
     poolController.handleTokenInterest(tokensWithPools, chainId);
