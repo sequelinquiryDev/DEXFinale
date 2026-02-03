@@ -32,6 +32,10 @@ export class PoolScheduler {
   private executionLoopIntervalId: NodeJS.Timeout | null = null;
   private multicallEngine: MulticallEngine;
 
+  // Promise for first run completion
+  private firstRunPromise: Promise<void> | null = null;
+  private resolveFirstRun: (() => void) | null = null;
+
   // PHASE 5: Micro-batching collection window
   private collectionWindow = timingConfig.MICROBATCH_COLLECTION_WINDOW_MS;
   private pendingPoolsForBatch: Set<string> = new Set(); // poolKey deduplication
@@ -48,6 +52,10 @@ export class PoolScheduler {
       ethersAdapter,
       providerCount
     );
+    // Initialize the promise for first run
+    this.firstRunPromise = new Promise((resolve) => {
+      this.resolveFirstRun = resolve;
+    });
   }
 
   /**
@@ -92,6 +100,19 @@ export class PoolScheduler {
     };
     
     scheduleNextExecution();
+  }
+
+  /**
+   * Wait for the first batch of pools to be executed.
+   * @returns A promise that resolves when the first batch is flushed.
+   */
+  public async waitForFirstRun(): Promise<void> {
+    if (this.lastBatchExecutionTime > 0) {
+      return;
+    }
+    if (this.firstRunPromise) {
+      await this.firstRunPromise;
+    }
   }
 
   /**
@@ -178,6 +199,12 @@ export class PoolScheduler {
    * Converts pending pool keys back to AlivePool objects and executes
    */
   private async flushBatch(): Promise<void> {
+    // Resolve the first run promise if it exists
+    if (this.resolveFirstRun) {
+      this.resolveFirstRun();
+      this.resolveFirstRun = null; // Ensure it only resolves once
+    }
+
     if (this.batchFlushTimer) {
       clearTimeout(this.batchFlushTimer);
       this.batchFlushTimer = null;
@@ -282,6 +309,11 @@ export class PoolScheduler {
               );
             }
           }
+
+          if (pool) {
+            poolController.resetPoolRefCount(pool.address, pool.chainId);
+          }
+
         } else {
           // Failed result - schedule retry
           console.warn(

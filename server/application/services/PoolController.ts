@@ -122,6 +122,21 @@ export class PoolController {
   }
 
   /**
+   * Reset reference count for a pool
+   * Called by scheduler after pool state is calculated
+   * 
+   * @param poolAddress Pool contract address
+   * @param chainId Chain ID
+   */
+  public resetPoolRefCount(poolAddress: string, chainId: number): void {
+    const poolKey = `${chainId}:${poolAddress}`;
+    const pool = this.aliveSet.get(poolKey);
+    if (pool) {
+      pool.refCount = 0;
+    }
+  }
+
+  /**
    * PHASE 2: Get pools due for refresh
    * 
    * Called by scheduler to determine which pools need querying.

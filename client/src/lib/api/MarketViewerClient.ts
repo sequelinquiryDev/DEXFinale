@@ -19,16 +19,41 @@ export class MarketViewerClient {
   }
 
   /**
-   * Fetch market overview for all tokens on a network
-   * GET /api/market/overview?chainId=X
+   * Fetch market overview for a list of tokens on a network
+   * POST /api/market/overview
    * 
    * @param chainId - Network chain ID (1 for Ethereum, 137 for Polygon)
-   * @returns Market overview with all tokens or null if error
+   * @param tokenAddresses - Array of token addresses to fetch data for
+   * @returns Market overview with the specified tokens or null if error
    */
-  public async getMarketOverview(chainId: number): Promise<MarketOverview | null> {
+  public async getMarketOverview(
+    chainId: number,
+    tokenAddresses: string[]
+  ): Promise<MarketOverview | null> {
     try {
-      console.log(`📊 [MarketViewer] Fetching overview for chain ${chainId}`);
-      const response = await fetch(`${this.baseUrl}/market/overview?chainId=${chainId}`);
+      console.log(`📊 [MarketViewer] Fetching overview for ${tokenAddresses.length} tokens on chain ${chainId}`);
+      
+      if (tokenAddresses.length === 0) {
+        // If no tokens are requested, return an empty overview to prevent errors.
+        return {
+          chainId: chainId,
+          tokens: [],
+          timestamp: Date.now(),
+          totalLiquidity: 0,
+          totalVolume24h: 0,
+        };
+      }
+
+      const response = await fetch(`${this.baseUrl}/market/overview`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          tokenAddresses,
+          chainId,
+        }),
+      });
 
       if (!response.ok) {
         console.error(`[MarketViewer] Overview fetch failed: ${response.statusText}`);

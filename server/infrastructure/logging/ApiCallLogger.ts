@@ -32,6 +32,7 @@ export interface ApiCallLogEntry {
   // Request Details
   requestMethod: 'GET' | 'POST' | 'RPC_CALL';
   requestData?: any; // Query params or RPC params
+  tokenCount?: number; // Number of tokens in the request
   
   // Response Details
   statusCode?: number; // HTTP status
@@ -97,7 +98,7 @@ export class ApiCallLogger {
     endpoint: string,
     chainId: number,
     durationMs: number,
-    options?: { requestedBy?: string; purpose?: string; cached?: boolean }
+    options?: { requestedBy?: string; purpose?: string; cached?: boolean; tokenCount?: number }
   ): ApiCallLogEntry {
     return this.log({
       apiName,
@@ -110,6 +111,7 @@ export class ApiCallLogger {
       fallback: false,
       requestedBy: options?.requestedBy,
       purpose: options?.purpose,
+      tokenCount: options?.tokenCount,
       traceId: this.generateTraceId(),
     });
   }
@@ -280,9 +282,10 @@ export class ApiCallLogger {
     const status = entry.statusCode === 200 ? '✓' : '✗';
     const source = entry.cached ? '(cached)' : entry.fallback ? '(fallback)' : '';
     const duration = `${entry.durationMs}ms`;
+    const tokenCount = entry.tokenCount ? `(${entry.tokenCount} tokens)` : '';
 
     console.log(
-      `[API] ${status} ${entry.apiName} | ${entry.endpoint.substring(0, 50)} | Chain ${entry.chainId} | ${duration} ${source}`
+      `[API] ${status} ${entry.apiName} | ${entry.endpoint.substring(0, 50)} | Chain ${entry.chainId} | ${duration} ${source} ${tokenCount}`
     );
 
     if (entry.error) {

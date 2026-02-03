@@ -130,21 +130,32 @@ export async function registerRoutes(
   // MARKET VIEWER ENDPOINTS
   
   /**
-   * GET /api/market/overview?chainId=1
-   * Get market overview for all tokens on a network
-   * Returns: MarketOverview with all tokens and aggregate metrics
+   * POST /api/market/overview
+   * Get market overview for a specific list of tokens on a network.
+   * This is the HOT PATH for the paginated dashboard view.
+   * Request: { chainId: 137, tokenAddresses: ["0x..."] }
+   * Returns: MarketOverview with data for the specified tokens.
    */
-  app.get('/api/market/overview', async (req, res) => {
+  app.post('/api/market/overview', async (req, res) => {
     try {
-      const chainId = req.query.chainId ? Number(req.query.chainId) : 137;
+      const { chainId, tokenAddresses } = req.body;
+
+      if (!chainId || (chainId !== 1 && chainId !== 137)) {
+        return res.status(400).json({ message: "chainId is required and must be 1 (Ethereum) or 137 (Polygon)" });
+      }
+
+      if (!tokenAddresses || !Array.isArray(tokenAddresses)) {
+        return res.status(400).json({ message: "tokenAddresses must be an array of strings" });
+      }
       
       const startTime = Date.now();
-      const overview = await marketViewerService.getMarketOverview(chainId);
+      const overview = await marketViewerService.getMarketOverview(chainId, tokenAddresses);
       const durationMs = Date.now() - startTime;
       
       apiLogger.logSuccess('MarketViewer', `/api/market/overview`, chainId, durationMs, {
-        requestedBy: 'Dashboard',
-        purpose: 'market-overview',
+        requestedBy: 'TokenMarketView',
+        purpose: 'paginated-market-overview',
+        tokenCount: tokenAddresses.length,
       });
       
       res.json(overview);

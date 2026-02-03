@@ -2,16 +2,18 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '@shared/routes';
 import { marketViewerClient } from '@/lib/api/MarketViewerClient';
-import { SwapInterface, TokenMetadata } from '@/components/SwapInterface';
+import { SwapInterface } from '@/components/SwapInterface';
 import { NetworkSelector } from '@/components/NetworkSelector';
 import { TokenMarketView } from '@/components/TokenMarketView';
 import { Sidebar, SidebarProvider } from '@/components/ui/sidebar';
+import type { TokenMetadata } from '@shared/schema';
 
 export default function Dashboard() {
   const [selectedNetwork, setSelectedNetwork] = useState<number>(137); // Default to Polygon
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [isAddingToken, setIsAddingToken] = useState<boolean>(false);
 
+  // This is the "cold path" query. It fetches a paginated list of basic token metadata.
   const { data: tokensData, isLoading, error } = useQuery<{
     tokens: TokenMetadata[];
     pagination: {
@@ -21,7 +23,7 @@ export default function Dashboard() {
       totalPages: number;
     };
   }>({
-    queryKey: ['tokens', selectedNetwork, currentPage],
+    queryKey: ['tokens', 'metadata', selectedNetwork, currentPage], // Ensure this key is unique to this query
     queryFn: async () => {
       const url = new URL(api.tokens.getAll.path, window.location.origin);
       url.searchParams.append('chainId', String(selectedNetwork));
@@ -32,7 +34,7 @@ export default function Dashboard() {
       }
       const data = await res.json();
       if (!data || !Array.isArray(data.tokens)) {
-        throw new Error('Invalid response format');
+        throw new Error('Invalid response format for token metadata');
       }
       return data;
     },
@@ -44,18 +46,16 @@ export default function Dashboard() {
     setCurrentPage(1);
   };
 
-  const tokens = tokensData?.tokens || [];
-
   const handleAddToken = async (address: string) => {
     setIsAddingToken(true);
     try {
       const result = await marketViewerClient.addToken(address, selectedNetwork);
       if (result.success) {
         console.log(`✅ Token added to quarantine: ${result.status}`);
-        // Could show toast notification here
+        // You could show a toast notification here for success
       } else {
         console.error(`❌ Failed to add token: ${result.message}`);
-        // Could show error toast here
+        // You could show an error toast here
       }
     } catch (err) {
       console.error('Error adding token:', err);
@@ -65,8 +65,10 @@ export default function Dashboard() {
   };
 
   if (error) {
-    return <div className="p-8 text-red-600">Error loading tokens: {error instanceof Error ? error.message : 'Unknown error'}</div>;
+    return <div className="p-8 text-red-600">Error loading token metadata: {error instanceof Error ? error.message : 'Unknown error'}</div>;
   }
+
+  const paginatedTokens = tokensData?.tokens || [];
 
   return (
     <SidebarProvider>
@@ -87,14 +89,21 @@ export default function Dashboard() {
           <div className="px-8 py-8">
             {/* Swap Card */}
             <div className="mb-12">
-              <SwapInterface tokens={tokensData?.tokens || []} chainId={selectedNetwork} />
+              {/* The SwapInterface might also need the full list of tokens for its dropdowns */}
+              <SwapInterface tokens={paginatedTokens} chainId={selectedNetwork} />
             </div>
             {/* Market Overview */}
             {isLoading ? (
-              <div className="text-center py-12 text-gray-500">Loading tokens...</div>
+              <div className="text-center py-12 text-gray-500">Loading token list...</div>
             ) : (
               <>
-                <TokenMarketView chainId={selectedNetwork} onAddToken={handleAddToken} isAddingToken={isAddingToken} />
+                {/* Here we pass the paginated token metadata to the TokenMarketView */}
+                <TokenMarketView
+                  tokens={paginatedTokens}
+                  chainId={selectedNetwork}
+                  onAddToken={handleAddToken}
+                  isAddingToken={isAddingToken}
+                />
                 {/* Pagination Controls */}
                 {tokensData?.pagination && tokensData.pagination.totalPages > 1 && (
                   <div className="mt-8 flex items-center justify-between bg-white p-4 rounded-lg shadow-sm border border-gray-200">

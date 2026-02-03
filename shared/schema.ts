@@ -24,6 +24,15 @@ export const snapshotSchema = z.object({
   entries: z.array(tokenEntrySchema),
 });
 
+// Minimal token info for cold path (paginated list)
+export const tokenMetadataSchema = z.object({
+  address: z.string(),
+  symbol: z.string(),
+  name: z.string(),
+  decimals: z.number(),
+  logoURI: z.string().optional(),
+});
+
 // === Market Viewer Types ===
 export const tokenMarketDataSchema = z.object({
   address: z.string(),
@@ -43,7 +52,7 @@ export const tokenMarketDataSchema = z.object({
   website: z.string().optional(),
   twitter: z.string().optional(),
   description: z.string().optional(),
-  dataSource: z.enum(['explorer-api', 'rpc-call', 'cached', 'multicall', 'alchemy-api']),
+  dataSource: z.enum(['explorer-api', 'rpc-call', 'cached', 'multicall', 'alchemy-api', 'search']),
   timestamp: z.number(),
   cachedUntil: z.number().optional(),
 });
@@ -105,6 +114,7 @@ export const quoteResponseSchema = z.object({
 export type Token = z.infer<typeof tokenSchema>;
 export type TokenEntry = z.infer<typeof tokenEntrySchema>;
 export type Snapshot = z.infer<typeof snapshotSchema>;
+export type TokenMetadata = z.infer<typeof tokenMetadataSchema>;
 export type TokenMarketData = z.infer<typeof tokenMarketDataSchema>;
 export type MarketOverview = z.infer<typeof marketOverviewSchema>;
 export type TokenSearchResult = z.infer<typeof tokenSearchResultSchema>;

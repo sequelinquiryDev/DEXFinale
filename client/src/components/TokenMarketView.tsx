@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, TrendingUp, Loader } from 'lucide-react';
 import { useMarketOverview } from '@/hooks/useMarketOverview';
 import { useDebounce } from '@/hooks/useDebounce';
@@ -6,41 +6,41 @@ import { marketViewerClient } from '@/lib/api/MarketViewerClient';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Card } from './ui/card';
-import type { TokenMarketData, TokenSearchResult } from '@shared/schema';
+import type { TokenMarketData, TokenSearchResult, TokenMetadata } from '@shared/schema';
 
 interface TokenMarketViewProps {
+  tokens: TokenMetadata[]; // The paginated list of tokens from the cold path
   chainId: number;
   onAddToken?: (address: string) => void;
   isAddingToken?: boolean;
 }
 
-export function TokenMarketView({ chainId, onAddToken, isAddingToken }: TokenMarketViewProps) {
+export function TokenMarketView({ tokens, chainId, onAddToken, isAddingToken }: TokenMarketViewProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [showAddToken, setShowAddToken] = useState(false);
   const [newTokenAddress, setNewTokenAddress] = useState('');
   
-  // Debounce search input (300ms delay)
   const debouncedSearchTerm = useDebounce(searchTerm, 300);
   
-  // Search results state
   const [searchResults, setSearchResults] = useState<TokenSearchResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
 
-  // Fetch market overview
-  const { data: overview, isLoading, error } = useMarketOverview(chainId);
+  // STEP 1: Get the addresses from the input tokens prop.
+  const tokenAddresses = useMemo(() => tokens.map(t => t.address), [tokens]);
 
-  // When search term changes (after debounce), call server search
+  // STEP 2: Fetch the detailed market data (hot path) for only these specific tokens.
+  const { data: overview, isLoading, error } = useMarketOverview(chainId, tokenAddresses);
+
   useEffect(() => {
     if (debouncedSearchTerm.trim().length === 0) {
-      // No search term - clear results
       setSearchResults([]);
       return;
     }
 
-    // Call server search API
     const performSearch = async () => {
       setIsSearching(true);
       try {
+        // Note: Search still hits a separate endpoint. This is expected.
         const results = await marketViewerClient.searchTokens(debouncedSearchTerm, chainId);
         setSearchResults(results || []);
       } catch (err) {
@@ -54,26 +54,26 @@ export function TokenMarketView({ chainId, onAddToken, isAddingToken }: TokenMar
     performSearch();
   }, [debouncedSearchTerm, chainId]);
 
-  const tokens = overview?.tokens || [];
-
-  // If user has entered search term, show search results; otherwise show full token list with client-side filter
-  const displayTokens = debouncedSearchTerm.trim().length > 0 
-    ? searchResults.map(result => ({
-        address: result.address,
-        symbol: result.symbol,
-        name: result.name,
-        decimals: result.decimals,
-        chainId: result.chainId,
+  // STEP 3: Determine which list to display.
+  const displayTokens = useMemo(() => {
+    if (debouncedSearchTerm.trim().length > 0) {
+      // If searching, display search results.
+      // We map search results to a partial TokenMarketData for consistent rendering.
+      return searchResults.map(result => ({
+        ...result,
         price: 0,
         priceChange24h: 0,
         liquidity: 0,
         volume24h: 0,
         holders: 0,
-        dataSource: 'cached' as const,
+        dataSource: 'search' as const,
         timestamp: Date.now(),
         cachedUntil: Date.now(),
-      }) as TokenMarketData)
-    : tokens;
+      }) as TokenMarketData);
+    }
+    // If not searching, display the market data for the paginated tokens.
+    return overview?.tokens || [];
+  }, [debouncedSearchTerm, searchResults, overview]);
 
   const handleAddToken = () => {
     if (newTokenAddress.trim() && onAddToken) {
@@ -153,7 +153,7 @@ export function TokenMarketView({ chainId, onAddToken, isAddingToken }: TokenMar
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {displayTokens.length === 0 ? (
               <div className="col-span-full text-center py-8 text-gray-500">
-                {debouncedSearchTerm && isSearching ? 'Searching...' : debouncedSearchTerm ? 'No tokens found' : 'No tokens available'}
+                {debouncedSearchTerm && isSearching ? 'Searching...' : debouncedSearchTerm ? 'No tokens found' : 'No tokens available for this page.'}
               </div>
             ) : (
               displayTokens.map((token) => (
