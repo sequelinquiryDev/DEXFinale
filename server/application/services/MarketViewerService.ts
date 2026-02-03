@@ -124,6 +124,7 @@ class MarketViewerService {
     }
 
     const price = await spotPricingEngine.computeSpotPrice(tokenAddress, chainId);
+    console.log(`[LOG-MARKET-DATA] Token ${tokenAddress.slice(0, 6)}... got price from engine: ${price}`);
 
     const hasValidPrice = price !== null && price > 0;
     const marketData: TokenMarketData = {
@@ -223,6 +224,8 @@ class MarketViewerService {
     );
 
     const marketDataResults = await Promise.all(marketDataPromises);
+    console.log(`[LOG-MARKET-OVERVIEW] Computed prices for ${marketDataResults.length} tokens`);
+    console.log(`[LOG-MARKET-OVERVIEW] Results summary: ${marketDataResults.map(t => `${t.symbol}=${t.price}`).join(', ')}`);
 
     const totalLiquidity = marketDataResults.reduce((sum: number, t: TokenMarketData) => sum + (t.liquidity || 0), 0);
     const totalVolume24h = marketDataResults.reduce((sum: number, t: TokenMarketData) => sum + (t.volume24h || 0), 0);

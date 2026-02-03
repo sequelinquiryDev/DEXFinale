@@ -156,6 +156,8 @@ export async function registerRoutes(
       const startTime = Date.now();
       const overview = await marketViewerService.getMarketOverview(chainId, tokenAddresses);
       const durationMs = Date.now() - startTime;
+      console.log(`[LOG-API] /api/market/overview returning ${overview.tokens.length} tokens, took ${durationMs}ms`);
+      console.log(`[LOG-API] Response token prices: ${overview.tokens.map(t => `${t.symbol}=$${t.price}`).join(', ')}`);
       
       apiLogger.logSuccess('MarketViewer', `/api/market/overview`, chainId, durationMs, {
         requestedBy: 'TokenMarketView',

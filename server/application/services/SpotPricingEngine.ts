@@ -110,6 +110,7 @@ class SpotPricingEngine {
     // If it's a stablecoin, return $1
     if (this.isUsdStablecoin(normalizedToken, chainId)) {
       console.log(`✓ [PRICING] ${tokenShort}... is USD stablecoin → $1.00`);
+      console.log(`[LOG-PRICING-RESULT] ${tokenShort}... RETURNING: 1.0 (stablecoin)`);
       return 1.0;
     }
 
@@ -119,6 +120,7 @@ class SpotPricingEngine {
 
     if (!tokenRoutes || Object.keys(tokenRoutes).length === 0) {
       console.log(`❌ [PRICING] ${tokenShort}... on chain ${chainId} → NO ROUTES (not discovered)`);
+      console.log(`[LOG-PRICING-RESULT] ${tokenShort}... RETURNING: null (no routes)`);
       return null;
     }
     
