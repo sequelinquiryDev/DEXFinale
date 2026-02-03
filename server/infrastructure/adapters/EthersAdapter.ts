@@ -204,7 +204,7 @@ export class EthersAdapter {
     const multicallContract = new ethers.Contract(multicallAddress, MULTICALL_ABI, provider);
 
     // Construct calls for each pool (slot0 + liquidity + token0 + token1)
-    const calls = [];
+    const calls: { target: string; callData: string }[] = [];
     for (const poolAddress of poolAddresses) {
       const poolIface = new ethers.Interface(POOL_ABI);
 
