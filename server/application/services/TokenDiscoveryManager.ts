@@ -110,25 +110,40 @@ export class TokenDiscoveryManager {
         // Get latest subgraph config
         const subgraphConfig = getSubgraphConfig();
         const subgraphs = subgraphConfig[chainId] || [];
-        const allPools: SubgraphPool[] = [];
+        const allPoolsAcrossAllPairs: SubgraphPool[] = [];
 
-        for (const subgraph of subgraphs) {
-          console.log(`   → Querying ${subgraph.name}...`);
-          try {
-            const pools = await this.querySubgraphForToken(token.address, subgraph, chainId);
-            allPools.push(...pools);
-            console.log(`     ✓ Found ${pools.length} pool(s)`);
-          } catch (error: any) {
-            console.warn(`     ⚠️  Query failed: ${error.message}`);
+        // FILTER 1: Per-pair 90% filtering
+        // For each base token, query independently and filter to 90%
+        for (const baseToken of baseTokenAddresses) {
+          for (const subgraph of subgraphs) {
+            try {
+              const poolsForThisPair = await this.querySubgraphForTokenAndBasePair(
+                token.address,
+                baseToken,
+                subgraph,
+                chainId
+              );
+              
+              if (poolsForThisPair.length > 0) {
+                // Apply 90% filter to this specific pair
+                const filteredForPair = this.filterPoolsByLiquidity(poolsForThisPair, this.LIQUIDITY_THRESHOLD);
+                console.log(`   → ${subgraph.name} / ${tokenSymbolMap.get(baseToken.toLowerCase()) || baseToken.slice(0, 6)}: ${poolsForThisPair.length} → ${filteredForPair.length} pool(s)`);
+                allPoolsAcrossAllPairs.push(...filteredForPair);
+              }
+            } catch (error: any) {
+              // Silently skip subgraph queries that fail
+            }
           }
         }
 
-        // Rank pools by liquidity and filter to 90% threshold
-        const rankedPools = this.filterPoolsByLiquidity(allPools, this.LIQUIDITY_THRESHOLD);
-        console.log(`   → After 90% filtering: ${rankedPools.length} pool(s)`);
+        console.log(`   → Total after per-pair 90% filters: ${allPoolsAcrossAllPairs.length} pool(s)`);
+
+        // FILTER 2: Global 90% filtering on combined results
+        const finalPools = this.filterPoolsByLiquidity(allPoolsAcrossAllPairs, this.LIQUIDITY_THRESHOLD);
+        console.log(`   → After global 90% filter: ${finalPools.length} pool(s)`);
 
         // Add pools to registry
-        for (const pool of rankedPools) {
+        for (const pool of finalPools) {
           this.addPoolToRegistry(poolRegistry, pool, chainId, baseTokenMap);
           poolsFoundForToken++;
           poolsDiscoveredThisBatch++;
@@ -198,6 +213,55 @@ export class TokenDiscoveryManager {
   }
 
   /**
+   * Query a subgraph for pools involving a specific token paired with a specific base token
+   * 
+   * @param tokenAddress Target token address
+   * @param baseTokenAddress Base token address (USDC, WETH, DAI, or USDT)
+   * @param subgraph Subgraph configuration
+   * @param chainId Network chain ID
+   * @returns Array of pools from subgraph
+   */
+  private async querySubgraphForTokenAndBasePair(
+    tokenAddress: string,
+    baseTokenAddress: string,
+    subgraph: SubgraphConfig,
+    chainId: number
+  ): Promise<SubgraphPool[]> {
+    const tokenLower = tokenAddress.toLowerCase();
+    const baseLower = baseTokenAddress.toLowerCase();
+
+    // Build query: find pools where token is paired with this specific base token only
+    const query = this.buildPoolQueryForPair(tokenLower, baseLower, subgraph.dexType);
+
+    try {
+      const response = await fetch(subgraph.endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json() as any;
+
+      if (data.errors) {
+        throw new Error(data.errors[0]?.message || 'Subgraph error');
+      }
+
+      // Extract pools from both query orderings and combine
+      const pools = [
+        ...(data.data?.token0First || []),
+        ...(data.data?.token1First || []),
+      ];
+      return pools;
+    } catch (error: any) {
+      throw new Error(`Failed to query ${subgraph.name}: ${error.message}`);
+    }
+  }
+
+  /**
    * Query a subgraph for pools involving a specific token and base tokens
    * 
    * @param tokenAddress Target token address
@@ -239,6 +303,72 @@ export class TokenDiscoveryManager {
       return pools;
     } catch (error: any) {
       throw new Error(`Failed to query ${subgraph.name}: ${error.message}`);
+    }
+  }
+
+  /**
+   * Build GraphQL query for pool discovery for a specific TOKEN/BASE pair
+   * 
+   * Queries depend on DEX type (V2 uses "pairs", V3 uses "pools")
+   * Queries BOTH token0/base and token1/base orderings
+   */
+  private buildPoolQueryForPair(tokenAddress: string, baseTokenAddress: string, dexType: string): string {
+    if (dexType === 'v2') {
+      // V2: Query for both token orderings in the pair
+      return `{
+        token0First: pairs(
+          first: 1000
+          where: { token0: "${tokenAddress}", token1: "${baseTokenAddress}" }
+          orderBy: reserveUSD
+          orderDirection: desc
+        ) {
+          id
+          token0 { id symbol decimals }
+          token1 { id symbol decimals }
+          reserveUSD
+        }
+        token1First: pairs(
+          first: 1000
+          where: { token0: "${baseTokenAddress}", token1: "${tokenAddress}" }
+          orderBy: reserveUSD
+          orderDirection: desc
+        ) {
+          id
+          token0 { id symbol decimals }
+          token1 { id symbol decimals }
+          reserveUSD
+        }
+      }`;
+    } else {
+      // V3: Query for both token orderings in the pool
+      return `{
+        token0First: pools(
+          first: 1000
+          where: { token0: "${tokenAddress}", token1: "${baseTokenAddress}" }
+          orderBy: totalValueLockedUSD
+          orderDirection: desc
+        ) {
+          id
+          token0 { id symbol decimals }
+          token1 { id symbol decimals }
+          reserveUSD: totalValueLockedUSD
+          feeTier
+          liquidity
+        }
+        token1First: pools(
+          first: 1000
+          where: { token0: "${baseTokenAddress}", token1: "${tokenAddress}" }
+          orderBy: totalValueLockedUSD
+          orderDirection: desc
+        ) {
+          id
+          token0 { id symbol decimals }
+          token1 { id symbol decimals }
+          reserveUSD: totalValueLockedUSD
+          feeTier
+          liquidity
+        }
+      }`;
     }
   }
 
@@ -342,7 +472,6 @@ export class TokenDiscoveryManager {
    * For a pool pairing tokenA with tokenB (a base token):
    * - Creates pool metadata
    * - Stores pool under registry.pricingRoutes[tokenA][baseSymbol] = [...pools]
-   * - Stores pool under registry.pricingRoutes[tokenB][tokenASymbol] = [...pools]
    * 
    * This enables efficient lookup: "What pools can price TOKEN using USDC?"
    * Answer: registry.pricingRoutes[TOKEN]['USDC']
@@ -386,21 +515,18 @@ export class TokenDiscoveryManager {
       registry.pricingRoutes[token1] = {};
     }
 
-    // Determine base token symbol for this pair
+    // Determine base token SYMBOL for this pair
     // Priority: token1 first (if base token), then token0 (if base token)
     // If neither is a base token, we skip this pool (no pricing path)
     let baseSymbol: string | null = null;
     let nonBaseToken: string | null = null;
-    let nonBaseSymbol: string | null = null;
 
     if (baseTokenMap.has(token1)) {
       baseSymbol = token1Symbol;
       nonBaseToken = token0;
-      nonBaseSymbol = token0Symbol;
     } else if (baseTokenMap.has(token0)) {
       baseSymbol = token0Symbol;
       nonBaseToken = token1;
-      nonBaseSymbol = token1Symbol;
     }
 
     // Skip pools where neither token is a base token
@@ -408,7 +534,7 @@ export class TokenDiscoveryManager {
       return;
     }
 
-    // Add pool to the non-base token's routes under the base token symbol
+    // Add pool to the non-base token's routes under the base token SYMBOL
     // Example: If pool is RAI/USDC, add pool to pricingRoutes[RAI]['USDC']
     if (!registry.pricingRoutes[nonBaseToken][baseSymbol]) {
       registry.pricingRoutes[nonBaseToken][baseSymbol] = [];

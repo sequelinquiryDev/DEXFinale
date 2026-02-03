@@ -32,28 +32,16 @@ const TOKEN_DECIMALS: Record<string, number> = {
   '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270': 18, // WMATIC
 };
 
-/**
- * Cached map of symbol to address for quick lookup
- * Built on first access
- */
-let symbolToAddressCache: Record<number, Map<string, string>> = {};
-
 class SpotPricingEngine {
   /**
    * Build a symbol-to-address map for a given chain
    */
   private async buildSymbolMap(chainId: number): Promise<Map<string, string>> {
-    if (symbolToAddressCache[chainId]) {
-      return symbolToAddressCache[chainId];
-    }
-
-    const map = new Map<string, string>();
     const tokens = await storageService.getTokensByNetwork(chainId);
+    const map = new Map<string, string>();
     for (const token of tokens) {
       map.set(token.symbol?.toUpperCase() || '', token.address.toLowerCase());
     }
-    
-    symbolToAddressCache[chainId] = map;
     return map;
   }
 
@@ -83,8 +71,8 @@ class SpotPricingEngine {
    * Uses pre-indexed pricing routes from pool registry (cold path output).
    * Fetches pool states from cache (hot path).
    * 
-   * New behavior: Nested pricingRoutes structure allows multi-hop pricing.
-   * pricingRoutes[tokenAddress][baseSymbol] = [poolAddresses]
+   * pricingRoutes structure: [tokenAddress][baseSymbol] = poolAddresses[]
+   * Routes are indexed by base token SYMBOL for efficient lookup and readability.
    * 
    * @param tokenAddress The address of the token to price.
    * @param chainId The chain ID of the token.
@@ -100,7 +88,7 @@ class SpotPricingEngine {
       return 1.0;
     }
 
-    // Get pricing routes from pool registry (new nested structure)
+    // Get pricing routes from pool registry
     const poolRegistry = await storageService.getPoolRegistry(chainId);
     const tokenRoutes = poolRegistry.pricingRoutes[normalizedToken];
 
@@ -112,31 +100,32 @@ class SpotPricingEngine {
     const totalPools = Object.values(tokenRoutes).reduce((sum, pools) => sum + pools.length, 0);
     console.log(`ℹ️ [PRICING] ${tokenShort}... has ${Object.keys(tokenRoutes).length} base token(s), ${totalPools} pool(s)`);
 
-    // Build symbol-to-address map
+    // Build symbol-to-address map for resolving base token symbols
     const symbolMap = await this.buildSymbolMap(chainId);
 
     // Strategy 1: Find a direct route to a USD stablecoin with cached pool
     let bestPoolAddress: string | null = null;
+    let bestBaseSymbol: string | null = null;
     let bestBaseAddress: string | null = null;
 
     // First, try to find a stablecoin base with a cached pool
     for (const baseSymbol in tokenRoutes) {
       const baseAddress = symbolMap.get(baseSymbol);
       if (!baseAddress) continue;
+      if (!this.isUsdStablecoin(baseAddress, chainId)) continue;
 
-      if (this.isUsdStablecoin(baseAddress, chainId)) {
-        // This base is a USD stablecoin, check if any pool is cached
-        const poolAddresses = tokenRoutes[baseSymbol];
-        for (const poolAddr of poolAddresses) {
-          if (sharedStateCache.getPoolState(poolAddr)) {
-            bestPoolAddress = poolAddr;
-            bestBaseAddress = baseAddress;
-            console.log(`✓ [PRICING] ${tokenShort}... found CACHED ${baseSymbol} route (pool: ${poolAddr.slice(0, 6)}...)`);
-            break;
-          }
+      // This base is a USD stablecoin, check if any pool is cached
+      const poolAddresses = tokenRoutes[baseSymbol];
+      for (const poolAddr of poolAddresses) {
+        if (sharedStateCache.getPoolState(poolAddr)) {
+          bestPoolAddress = poolAddr;
+          bestBaseSymbol = baseSymbol;
+          bestBaseAddress = baseAddress;
+          console.log(`✓ [PRICING] ${tokenShort}... found CACHED ${baseSymbol} route (pool: ${poolAddr.slice(0, 6)}...)`);
+          break;
         }
-        if (bestPoolAddress) break;
       }
+      if (bestPoolAddress) break;
     }
 
     // Strategy 2: If no stablecoin route with cache, try WETH
@@ -147,6 +136,7 @@ class SpotPricingEngine {
         for (const poolAddr of poolAddresses) {
           if (sharedStateCache.getPoolState(poolAddr)) {
             bestPoolAddress = poolAddr;
+            bestBaseSymbol = wethSymbol;
             bestBaseAddress = symbolMap.get(wethSymbol) || null;
             console.log(`⚠️ [PRICING] ${tokenShort}... using WETH route (pool: ${poolAddr.slice(0, 6)}..., will recurse)`);
             break;
@@ -165,6 +155,7 @@ class SpotPricingEngine {
         for (const poolAddr of poolAddresses) {
           if (sharedStateCache.getPoolState(poolAddr)) {
             bestPoolAddress = poolAddr;
+            bestBaseSymbol = baseSymbol;
             bestBaseAddress = baseAddress;
             console.log(`⚠️ [PRICING] ${tokenShort}... using ${baseSymbol} route (will recurse)`);
             break;
@@ -213,7 +204,7 @@ class SpotPricingEngine {
     }
 
     // Otherwise, recursively get the USD price of the base token
-    console.log(`⚠️ [PRICING] ${tokenShort}... recursing for base token (${bestBaseAddress.slice(0, 6)}...)`);
+    console.log(`⚠️ [PRICING] ${tokenShort}... recursing for base token ${bestBaseSymbol} (${bestBaseAddress.slice(0, 6)}...)`);
     const baseUsdPrice = await this.computeSpotPrice(bestBaseAddress, chainId);
     if (baseUsdPrice === null) {
       console.log(`❌ [PRICING] ${tokenShort}... → RECURSIVE BASE PRICE FAILED`);
