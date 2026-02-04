@@ -7,6 +7,7 @@ export interface Token {
   decimals: number;
   logoURI?: string;
   chainId: number;
+  logoFetchedAt?: number;
 }
 
 export interface PoolData {

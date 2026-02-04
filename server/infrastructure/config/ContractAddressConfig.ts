@@ -33,10 +33,12 @@ const CONTRACT_ADDRESSES: {
 };
 
 /**
- * Get contract address for a specific network
- * @param chainId - Network chain ID (1 = Ethereum, 137 = Polygon)
- * @param contract - Contract name (multicall, uniswapV3Factory)
+ * Get contract address for a specific network.
+ * This function only supports Ethereum Mainnet (1) and Polygon Mainnet (137).
+ * @param chainId - Network chain ID (1 for Ethereum, 137 for Polygon)
+ * @param contract - Contract name ('multicall' or 'uniswapV3Factory')
  * @returns Contract address
+ * @throws If the chainId is not 1 or 137.
  */
 export function getContractAddress(
   chainId: number | string,
@@ -45,20 +47,21 @@ export function getContractAddress(
   const id = typeof chainId === 'string' ? parseInt(chainId, 10) : chainId;
   
   let networkKey: string;
-  if (id === 1 || id === 5 || id === 11155111) {
-    // Ethereum mainnet, Goerli, Sepolia
+  if (id === 1) {
+    // Ethereum mainnet
     networkKey = 'ethereum';
-  } else if (id === 137 || id === 80001) {
-    // Polygon mainnet, Mumbai testnet
+  } else if (id === 137) {
+    // Polygon mainnet
     networkKey = 'polygon';
   } else {
-    // Default to Ethereum for unknown chains
-    networkKey = 'ethereum';
+    // Explicitly block any other chain to prevent silent errors.
+    throw new Error(`Unsupported chainId: ${id}. Only Ethereum Mainnet (1) and Polygon Mainnet (137) are configured.`);
   }
   
   const address = CONTRACT_ADDRESSES[networkKey][contract];
   if (!address) {
-    throw new Error(`Contract '${contract}' not configured for chainId ${chainId}`);
+    // This should not be reachable if the networkKey is valid, but serves as a safeguard.
+    throw new Error(`Contract '${contract}' is not configured for network '${networkKey}'.`);
   }
   
   return address;

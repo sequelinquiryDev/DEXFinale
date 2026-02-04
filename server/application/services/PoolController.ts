@@ -69,12 +69,12 @@ export class PoolController {
           pool.requestCount++;
         } else {
           // New pool entering the alive set
-          // Start with "high" tier (5s refresh) for new pools
+          // Start with "normal" tier (10s refresh) for new pools
           this.aliveSet.set(poolKey, {
             address: poolAddress,
             chainId: chainId,
-            tier: "high",
-            nextRefresh: Date.now() + 5000, // 5 seconds
+            tier: "normal",
+            nextRefresh: Date.now() + 10000, // 10 seconds
             lastBlockSeen: 0,
             lastPrice: 0,
             requestCount: 1,

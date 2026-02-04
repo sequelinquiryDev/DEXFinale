@@ -322,13 +322,11 @@ export class PoolScheduler {
               console.log(
                 `  📊 ${result.poolAddress.slice(0, 6)}... → block ${result.blockNumber}, tier: ${pool.tier}`
               );
+
+              // CORRECT PLACEMENT: Reset refCount only after full processing
+              poolController.resetPoolRefCount(pool.address, pool.chainId);
             }
           }
-
-          if (pool) {
-            poolController.resetPoolRefCount(pool.address, pool.chainId);
-          }
-
         } else {
           // Failed result - schedule retry
           console.warn(

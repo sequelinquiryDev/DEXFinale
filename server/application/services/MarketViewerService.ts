@@ -202,6 +202,11 @@ class MarketViewerService {
     // 4. Start scheduler if needed.
     await this.startSchedulerIfNeeded();
 
+    // **FIX: Wait for the scheduler to complete its first run before proceeding**
+    if (this.poolScheduler) {
+      await this.poolScheduler.waitForFirstRun();
+    }
+
     const marketDataPromises = tokensWithPools.map(token =>
       this.getTokenMarketData(token.address, chainId).catch(error => {
         console.error(`Error fetching market data for ${token.symbol}:`, error.message);

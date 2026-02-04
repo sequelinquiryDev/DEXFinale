@@ -52,22 +52,16 @@ class SpotPricingEngine {
    * Get pool state - from cache if available, otherwise fetch directly from contract
    */
   private async getPoolState(poolAddress: string, chainId: number) {
-    // Try cache first
-    const cached = sharedStateCache.getPoolState(poolAddress);
+    // ONLY check cache. Do not fall back to a direct RPC query.
+    // The PoolScheduler is responsible for populating this cache.
+    const cached = sharedStateCache.getPoolState(poolAddress.toLowerCase());
     if (cached) {
       return cached;
     }
-    
-    // Fall back to direct RPC query
-    try {
-      const poolState = await this.ethersAdapter.getPoolState(poolAddress, chainId);
-      // Store in cache for future use
-      sharedStateCache.setPoolState(poolAddress, poolState);
-      return poolState;
-    } catch (error) {
-      console.error(`Error fetching pool state for ${poolAddress}:`, error);
-      return null;
-    }
+
+    // If it's not in the cache, we return null and wait for the scheduler to run.
+    console.log(`[SPOT-PRICING] Pool state for ${poolAddress} not in cache. Awaiting scheduler.`);
+    return null;
   }
 
   /**
