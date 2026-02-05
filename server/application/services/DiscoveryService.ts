@@ -56,7 +56,7 @@ export class DiscoveryService {
                 metadata = {
                   name: info.tokenName || info.name || token.name,
                   symbol: info.symbol || token.symbol,
-                  decimals: parseInt(info.divisor || info.decimals || token.decimals.toString()),
+                  decimals: parseInt(info.divisor || info.decimals || (token.decimals || 18).toString()),
                   logoURI: info.logo || info.logoURI || '',
                   logoFetchedAt: (info.logo || info.logoURI) ? Date.now() : undefined,
                 };
@@ -131,18 +131,5 @@ export class DiscoveryService {
     }
 
     console.log('\n✅ Pool discovery and topology update complete.');
-  }
-
-  /**
-   * Periodically refreshes the state of all known pools in the cache.
-   */
-  async refreshPools(): Promise<void> {
-    // This is a placeholder for a more sophisticated refresh mechanism.
-    // In a real application, you'd get the list of pools from the cache keys
-    // and update them in batches.
-    console.log('Refreshing pool states...');
-    // This is where we would iterate through the cached pools and update their state
-    // For now, we will re-discover to refresh
-    await this.discoverAndPrimeCache();
   }
 }
