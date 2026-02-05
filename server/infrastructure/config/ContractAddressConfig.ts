@@ -7,7 +7,6 @@
 
 interface ContractAddresses {
   multicall: string;
-  uniswapV3Factory: string;
 }
 
 const CONTRACT_ADDRESSES: {
@@ -18,17 +17,11 @@ const CONTRACT_ADDRESSES: {
   ethereum: {
     // Multicall3: Universal multicall contract across all networks
     multicall: "0xca11bde05977b3631167028862be2a173976ca11",
-    
-    // Uniswap V3 Factory: Used for discovering pools
-    uniswapV3Factory: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
-  },
+      },
   
   polygon: {
     // Multicall3: Same address on Polygon
     multicall: "0xca11bde05977b3631167028862be2a173976ca11",
-    
-    // Uniswap V3 Factory: Same address on Polygon
-    uniswapV3Factory: "0x1F98431c8aD98523631AE4a59f267346ea31F984",
   },
 };
 
