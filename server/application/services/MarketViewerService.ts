@@ -31,6 +31,7 @@ import { PoolScheduler } from './PoolScheduler';
 import { EthersAdapter } from '../../infrastructure/adapters/EthersAdapter';
 import { providersConfig } from '../../infrastructure/config/ProvidersConfig';
 import { timingConfig } from '../../infrastructure/config/TimingConfig';
+import { ChainId } from '../../infrastructure/config/NetworkConfig';
 import type { TokenMetadata } from '../../../shared/schema';
 import {
   TokenMarketData,
@@ -61,19 +62,11 @@ class MarketViewerService {
     try {
       // Get RPC providers from config
       const rpcProviders: { [chainId: number]: string } = {};
-      try {
-        rpcProviders[1] = providersConfig.getRpcProvider(1);
-      } catch {
-        rpcProviders[1] = process.env.ETHEREUM_PUBLIC_RPC || 'https://cloudflare-eth.com';
-      }
-      try {
-        rpcProviders[137] = providersConfig.getRpcProvider(137);
-      } catch {
-        rpcProviders[137] = process.env.POLYGON_PUBLIC_RPC || 'https://polygon-rpc.com';
-      }
+      rpcProviders[ChainId.ETHEREUM] = providersConfig.getChainProviders(ChainId.ETHEREUM).rpcEndpoint;
+      rpcProviders[ChainId.POLYGON] = providersConfig.getChainProviders(ChainId.POLYGON).rpcEndpoint;
 
-      const ethersAdapter = new EthersAdapter(rpcProviders);
-      this.poolScheduler = new PoolScheduler(this.storageService, ethersAdapter, 1);
+      const ethersAdapter = new EthersAdapter();
+      this.poolScheduler = new PoolScheduler(this.storageService, ethersAdapter);
     } catch (error) {
       console.error('Failed to initialize PoolScheduler:', error);
     }

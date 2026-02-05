@@ -13,7 +13,7 @@
 import { StorageService } from './StorageService';
 import { Token } from '../../domain/entities';
 import { PoolRegistry, PoolMetadata } from '../../domain/types';
-import { getSubgraphConfig, SubgraphConfig } from '../../infrastructure/config/SubgraphConfig';
+import { getSubgraphConfig, SubgraphConfig, SupportedChainId } from '../../infrastructure/config/SubgraphConfig';
 import { timingConfig } from '../../infrastructure/config/TimingConfig';
 import { networkConfig } from '../../infrastructure/config/NetworkConfig';
 
@@ -65,6 +65,12 @@ export class TokenDiscoveryManager {
    */
   public async discoverPoolsForTokens(tokens: Token[], chainId: number): Promise<number> {
     console.log(`🔍 [SUBGRAPH DISCOVERY] Discovering pools for ${tokens.length} token(s) on chain ${chainId}`);
+
+    // Validate chainId against networkConfig
+    if (!networkConfig.isChainSupported(chainId)) {
+      console.warn(`[SUBGRAPH DISCOVERY] Chain ID ${chainId} is not supported. Skipping discovery.`);
+      return 0;
+    }
     
     const poolRegistry = await this.storageService.getPoolRegistry(chainId);
     let poolsDiscoveredThisBatch = 0;
@@ -110,7 +116,7 @@ export class TokenDiscoveryManager {
       try {
         // Get latest subgraph config
         const subgraphConfig = getSubgraphConfig();
-        const subgraphs = subgraphConfig[chainId] || [];
+        const subgraphs = subgraphConfig[chainId as SupportedChainId] || [];
         const allPoolsAcrossAllPairs: SubgraphPool[] = [];
 
         // FILTER 1: Per-pair 90% filtering

@@ -1,4 +1,4 @@
-import { Token } from "../../../../shared/schema";
+import { Token } from "../../../shared/schema";
 /**
  * NetworkConfig - Network Definitions and Constants
  * 

@@ -17,9 +17,7 @@
  * - Provider distribution: batch N → provider (N % numProviders)
  */
 
-import { StorageService } from './StorageService';
 import { EthersAdapter } from '../../infrastructure/adapters/EthersAdapter';
-import { PoolRegistry, PoolMetadata } from '../../domain/types';
 import type { AlivePool } from './PoolController';
 
 const MAX_CALL_WEIGHT_PER_BATCH = 50; // Configurable safety limit
@@ -48,7 +46,6 @@ export class MulticallEngine {
   private providerCount: number = 1; // Will be set based on configured providers
 
   constructor(
-    private storageService: StorageService,
     private ethersAdapter: EthersAdapter,
     providerCount: number = 1
   ) {
@@ -64,14 +61,10 @@ export class MulticallEngine {
    * 3. Target provider = batchNumber % numProviders (round-robin)
    * 
    * @param pools Pools due for refresh
-   * @param chainId Network chain ID
-   * @param registry Pool registry containing weight information
    * @returns Array of batches ready for execution
    */
   public createBatches(
     pools: AlivePool[],
-    chainId: number,
-    registry: PoolRegistry
   ): MulticallBatch[] {
     const batches: MulticallBatch[] = [];
 
@@ -80,8 +73,7 @@ export class MulticallEngine {
     let batchNumber = 0;
 
     for (const pool of pools) {
-      const poolMetadata = registry.pools[pool.address];
-      const poolWeight = poolMetadata?.weight || 1;
+      const poolWeight = (pool.dexVersion === 'v2') ? 1 : 2;
 
       // Check if adding this pool would exceed limit
       if (currentWeight + poolWeight > MAX_CALL_WEIGHT_PER_BATCH && currentBatch.length > 0) {
@@ -137,7 +129,7 @@ export class MulticallEngine {
 
       try {
         const batchResults = await this.ethersAdapter.executeMulticall(
-          batch.pools.map(p => p.address),
+          batch.pools.map(p => ({ address: p.address, dexVersion: p.dexVersion })),
           batch.targetProviderIndex,
           chainId
         );
@@ -169,13 +161,12 @@ export class MulticallEngine {
    */
   public getBatchingStats(
     pools: AlivePool[],
-    registry: PoolRegistry
   ) {
-    const batches = this.createBatches(pools, 1, registry); // chainId=1 for stats only
+    const batches = this.createBatches(pools);
 
     const totalPoolWeight = pools.reduce((sum, pool) => {
-      const metadata = registry.pools[pool.address];
-      return sum + (metadata?.weight || 1);
+        const weight = (pool.dexVersion === 'v2') ? 1 : 2;
+        return sum + weight;
     }, 0);
 
     const maxBatchWeight = Math.max(...batches.map(b => b.totalWeight), 0);

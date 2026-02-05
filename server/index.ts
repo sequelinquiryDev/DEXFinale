@@ -22,6 +22,7 @@ import { providersConfig } from './infrastructure/config/ProvidersConfig';
 import { getRpcConfig } from './infrastructure/config/RpcConfig';
 import { explorerConfig } from './infrastructure/config/ExplorerConfig';
 import { initSpotPricingEngine } from './application/services/SpotPricingEngine.ts';
+import { ChainId } from './infrastructure/config/NetworkConfig';
 
 // Reinitialize config modules with loaded env vars
 const rpcConfig = getRpcConfig();
@@ -35,34 +36,12 @@ const server = http.createServer(app);
 app.use(express.json());
 app.use(express.static('dist/public'));
 
-// Build RPC provider map from ProvidersConfig; in development we allow a public RPC fallback
+// Build RPC provider map from ProvidersConfig
 const rpcProviders: { [chainId: number]: string } = {};
+rpcProviders[ChainId.ETHEREUM] = providersConfig.getChainProviders(ChainId.ETHEREUM).rpcEndpoint;
+rpcProviders[ChainId.POLYGON] = providersConfig.getChainProviders(ChainId.POLYGON).rpcEndpoint;
 
-try {
-  rpcProviders[1] = providersConfig.getRpcProvider(1);
-} catch (err) {
-  if (process.env.NODE_ENV !== 'production') {
-    console.warn('No configured RPC for Ethereum. Falling back to a public RPC endpoint for development. Set INFURA_API_KEY or ALCHEMY_API_KEY to avoid this in production.');
-    rpcProviders[1] = process.env.ETHEREUM_PUBLIC_RPC || 'https://cloudflare-eth.com';
-  } else {
-    console.error('No configured RPC for Ethereum. Please set INFURA_API_KEY or ALCHEMY_API_KEY. Exiting.');
-    process.exit(1);
-  }
-}
-
-try {
-  rpcProviders[137] = providersConfig.getRpcProvider(137);
-} catch (err) {
-  if (process.env.NODE_ENV !== 'production') {
-    console.warn('No configured RPC for Polygon. Falling back to a public RPC endpoint for development. Set POLYGON_RPC_URL to avoid this in production.');
-    rpcProviders[137] = process.env.POLYGON_PUBLIC_RPC || 'https://polygon-rpc.com';
-  } else {
-    console.error('No configured RPC for Polygon. Please set POLYGON_RPC_URL. Exiting.');
-    process.exit(1);
-  }
-}
-
-const ethersAdapter = new EthersAdapter(rpcProviders);
+const ethersAdapter = new EthersAdapter();
 const storageService = new StorageService();
 
 // Initialize SpotPricingEngine with ethersAdapter
@@ -97,8 +76,8 @@ const tokenDiscoveryManager = new TokenDiscoveryManager(storageService);
 // PHASE 7: Initialize and start quarantine validator
 const quarantineValidator = new QuarantineValidator(storageService, ethersAdapter, tokenDiscoveryManager);
 console.log('🔄 PHASE 7: Starting quarantine validator loops...');
-quarantineValidator.startValidationLoop(1); // Ethereum
-quarantineValidator.startValidationLoop(137); // Polygon
+quarantineValidator.startValidationLoop(ChainId.ETHEREUM); // Ethereum
+quarantineValidator.startValidationLoop(ChainId.POLYGON); // Polygon
 
 // PHASE 8: Initialize and start garbage collection manager
 const gcManager = new GCManager(storageService);

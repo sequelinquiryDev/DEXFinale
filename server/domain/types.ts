@@ -12,25 +12,27 @@ export interface TokenMetadata {
 
 /**
  * Represents the live, frequently changing state of a liquidity pool.
+ * This interface is now flexible to support both V2 (reserves) and V3 (liquidity/sqrtPrice) pools.
  */
 export interface PoolState {
     address: string;
-    liquidity: bigint;
-    sqrtPriceX96: bigint;
     token0: string;
     token1: string;
+    // V3-specific state
+    liquidity?: bigint;
+    sqrtPriceX96?: bigint;
+    // V2-specific state
+    reserve0?: bigint;
+    reserve1?: bigint;
+    // Common state
     fee?: number;
     timestamp?: number;
-    // PHASE 6: Cache versioning for tick consistency
     tickId?: string; // Unique identifier for this refresh cycle
     blockNumber?: number; // Block where this state was captured
 }
 
 /**
  * Pool Registry Phase 1: Pool Metadata
- * 
- * Metadata about a liquidity pool for pricing topology.
- * Used by hot path to schedule queries and understand pool structure.
  */
 export interface PoolMetadata {
   address: string;
@@ -43,18 +45,6 @@ export interface PoolMetadata {
 
 /**
  * Pool Registry Phase 2: Pricing Routes (Refactored)
- * 
- * Nested structure mapping each token to its pricing routes per base token.
- * For each token, routes are organized by base token (USDC, WETH, etc.).
- * Each base token maps to an array of pool addresses that form the pricing path.
- * 
- * Example structure:
- * {
- *   "0xTokenA": {
- *     "USDC": ["0xPool1", "0xPool2"],  // Direct TOKEN/USDC pools
- *     "WETH": ["0xPool3"]               // TOKEN/WETH pools for multi-hop
- *   }
- * }
  */
 export interface PoolRegistry {
   pools: Record<string, PoolMetadata>;
@@ -65,9 +55,6 @@ export interface PoolRegistry {
 
 /**
  * PHASE 7: Quarantine Entry
- * 
- * Represents a newly discovered token pending validation.
- * Tracks discovery time and validation status.
  */
 export interface QuarantineEntry {
   address: string;
@@ -79,9 +66,6 @@ export interface QuarantineEntry {
 
 /**
  * PHASE 7: Quarantine Registry
- * 
- * Registry for newly discovered tokens awaiting background validation.
- * Separate from primary registry to prevent untrusted tokens from reaching users.
  */
 export interface QuarantineRegistry {
   entries: Record<string, QuarantineEntry>;

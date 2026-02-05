@@ -26,6 +26,7 @@ import { MulticallEngine } from './MulticallEngine';
 import { StorageService } from './StorageService';
 import { EthersAdapter } from '../../infrastructure/adapters/EthersAdapter';
 import { timingConfig } from '../../infrastructure/config/TimingConfig';
+import { PoolState } from '../../domain/types';
 
 export class PoolScheduler {
   private isRunning = false;
@@ -44,15 +45,10 @@ export class PoolScheduler {
 
   constructor(
     private storageService: StorageService,
-    private ethersAdapter: EthersAdapter,
-    providerCount: number = 1
+    private ethersAdapter: EthersAdapter
   ) {
-    this.multicallEngine = new MulticallEngine(
-      storageService,
-      ethersAdapter,
-      providerCount
-    );
-    // Initialize the promise for first run
+    this.multicallEngine = new MulticallEngine(this.ethersAdapter);
+    
     this.firstRunPromise = new Promise((resolve) => {
       this.resolveFirstRun = resolve;
     });
@@ -60,9 +56,6 @@ export class PoolScheduler {
 
   /**
    * PHASE 3: Start the scheduler
-   * 
-   * Begins the execution loop that checks for pools due refresh.
-   * Called once on server startup.
    */
   async start(): Promise<void> {
     if (this.isRunning) {
@@ -73,28 +66,24 @@ export class PoolScheduler {
     console.log('🚀 Starting pool scheduler (tiered scheduling enabled)');
     this.isRunning = true;
 
-    // FIX #5: Dynamic interval - check at next pool refresh time, not fixed 10s
-    // This ensures high-volatility pools (5s tier) refresh on time
     const scheduleNextExecution = () => {
       if (!this.isRunning) return;
       
       const alivePoolsSet = poolController.getAliveSet();
       if (alivePoolsSet.length === 0) {
-        // No pools yet, check again in 1 second
         this.executionLoopIntervalId = setTimeout(scheduleNextExecution, 1000);
         return;
       }
       
-      // Find next pool that needs refresh
       const nextRefreshTime = Math.min(...alivePoolsSet.map(p => p.nextRefresh));
       const timeUntilNextRefresh = Math.max(0, nextRefreshTime - Date.now());
-      const delayMs = Math.min(timeUntilNextRefresh, 1000); // Max 1 second, min 0
+      const delayMs = Math.min(timeUntilNextRefresh, 1000);
       
       this.executionLoopIntervalId = setTimeout(() => {
         this.executionLoop().catch(error => {
           console.error('❌ Error in scheduler execution loop:', error);
         }).finally(() => {
-          scheduleNextExecution(); // Reschedule after execution
+          scheduleNextExecution();
         });
       }, delayMs);
     };
@@ -104,105 +93,58 @@ export class PoolScheduler {
 
   /**
    * Wait for the first batch of pools to be executed.
-   * @returns A promise that resolves when the first batch is flushed.
    */
   public async waitForFirstRun(): Promise<void> {
-    if (this.lastBatchExecutionTime > 0) {
-      return;
-    }
-    if (this.firstRunPromise) {
-      await this.firstRunPromise;
-    }
+    if (this.lastBatchExecutionTime > 0) return;
+    if (this.firstRunPromise) await this.firstRunPromise;
   }
 
   /**
-   * PHASE 3-4: Main execution loop
-   * 
-   * Called every 1 second to:
-   * 1. Check which pools are due for refresh
-   * 2. Collect into pending batch (with deduplication)
-   * 3. Wait for collection window (50-100ms) to batch
-   * 4. Execute multicall for deduplicated batch
-   * 5. Update tiers based on price changes
-   * 6. Reschedule next refresh
-   * 
-   * PHASE 5 IMPROVEMENT: Micro-batching
-   * - Pools are collected in pendingPoolsForBatch
-   * - Collection window allows deduplication within window
-   * - Batch executes when: window expires OR 10+ pools collected
+   * Main execution loop
    */
   private async executionLoop(): Promise<void> {
-    // Get pools that are due for refresh (nextRefresh <= now)
     const poolsDue = poolController.getPoolsForRefresh();
+    if (poolsDue.length === 0) return;
 
-    if (poolsDue.length === 0) {
-      return; // Nothing to do
-    }
-
-    // PHASE 5: Add pools to pending batch (with deduplication by poolKey)
-    const poolsByChain = new Map<number, AlivePool[]>();
     let newPoolsAdded = 0;
-
     for (const pool of poolsDue) {
-      const chainId = pool.chainId || 1;
-      const poolKey = `${chainId}:${pool.address}`;
-      
+      const poolKey = `${pool.chainId}:${pool.address}`;
       if (!this.pendingPoolsForBatch.has(poolKey)) {
         this.pendingPoolsForBatch.add(poolKey);
         newPoolsAdded++;
-        
-        // Organize by chain for batch execution
-        if (!poolsByChain.has(chainId)) {
-          poolsByChain.set(chainId, []);
-        }
-        poolsByChain.get(chainId)!.push(pool);
       }
     }
 
-    if (newPoolsAdded === 0) {
-      return; // All pools already pending, wait for window
-    }
+    if (newPoolsAdded === 0) return;
 
-    console.log(`⚡ [SCHEDULER] ${newPoolsAdded} new pool(s) added to pending batch (total pending: ${this.pendingPoolsForBatch.size})`);
-
-    // PHASE 5: Schedule batch flush
-    // If no timer is active, start one
     if (!this.batchFlushTimer) {
       this.scheduleBatchFlush();
     }
 
-    // PHASE 5: Threshold check - if we have 10+ pools, flush immediately
     if (this.pendingPoolsForBatch.size >= 10) {
-      console.log(`📦 [SCHEDULER] Threshold reached (${this.pendingPoolsForBatch.size} pools), flushing batch immediately`);
       await this.flushBatch();
     }
   }
 
   /**
-   * PHASE 5: Schedule batch flush after collection window
-   * Ensures we wait before executing, allowing deduplication
+   * Schedule batch flush after collection window
    */
   private scheduleBatchFlush(): void {
-    if (this.batchFlushTimer) {
-      clearTimeout(this.batchFlushTimer);
-    }
+    if (this.batchFlushTimer) clearTimeout(this.batchFlushTimer);
 
     this.batchFlushTimer = setTimeout(async () => {
-      console.log(`⏱️ [SCHEDULER] Collection window expired, flushing ${this.pendingPoolsForBatch.size} deduplicated pool(s)`);
       await this.flushBatch();
       this.batchFlushTimer = null;
     }, this.collectionWindow);
   }
 
   /**
-   * PHASE 5: Execute pending batch and clear
-   * Converts pending pool keys back to AlivePool objects and executes
+   * Execute pending batch and clear
    */
   private async flushBatch(): Promise<void> {
-    // Resolve the first run promise if it exists
     if (this.resolveFirstRun) {
       this.resolveFirstRun();
-      this.resolveFirstRun = null; // Ensure it only resolves once
+      this.resolveFirstRun = null;
     }
 
     if (this.batchFlushTimer) {
@@ -210,31 +152,19 @@ export class PoolScheduler {
       this.batchFlushTimer = null;
     }
 
-    if (this.pendingPoolsForBatch.size === 0) {
-      return;
-    }
+    if (this.pendingPoolsForBatch.size === 0) return;
 
-    // Convert poolKeys back to AlivePool objects from controller
     const aliveSet = poolController.getAliveSet();
     const poolsToExecute: AlivePool[] = [];
-    
     for (const poolKey of this.pendingPoolsForBatch) {
-      const [chainIdStr, address] = poolKey.split(':');
-      const pool = aliveSet.find(p => p.address === address && p.chainId === Number(chainIdStr));
-      if (pool) {
-        poolsToExecute.push(pool);
-      }
+      const pool = aliveSet.find(p => `${p.chainId}:${p.address}` === poolKey);
+      if (pool) poolsToExecute.push(pool);
     }
 
-    // Clear pending batch before execution
     this.pendingPoolsForBatch.clear();
+    if (poolsToExecute.length === 0) return;
 
-    if (poolsToExecute.length === 0) {
-      return;
-    }
-
-    // Group by chain and execute
-    const poolsByChain = new Map<number, typeof poolsToExecute>();
+    const poolsByChain = new Map<number, AlivePool[]>();
     for (const pool of poolsToExecute) {
       const chainId = pool.chainId || 1;
       if (!poolsByChain.has(chainId)) {
@@ -253,122 +183,93 @@ export class PoolScheduler {
   /**
    * Execute multicall for a specific chain's pools
    */
-  private async executeForChain(chainId: number, poolsDue: Array<{ address: string; chainId: number; tier: string; nextRefresh: number; lastBlockSeen: number; lastPrice: number; requestCount: number; lastRequestTime: number }>): Promise<void> {
-    if (poolsDue.length === 0) {
-      return;
-    }
+  private async executeForChain(chainId: number, poolsDue: AlivePool[]): Promise<void> {
+    if (poolsDue.length === 0) return;
 
-    // PHASE 6: Generate unique tick ID for this refresh cycle
     const tickId = `tick_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
-    console.log(`⚡ Scheduler: ${poolsDue.length} pool(s) due for refresh [${tickId}]`);
-
-    // PHASE 4: Get pool registry for this chain
     const poolRegistry = await this.storageService.getPoolRegistry(chainId);
+    
+    const batches = this.multicallEngine.createBatches(poolsDue);
 
-    // PHASE 4: Create weight-aware batches
-    const batches = this.multicallEngine.createBatches(poolsDue as AlivePool[], chainId, poolRegistry);
-    console.log(`📦 Created ${batches.length} batch(es) for execution`);
-
-    // PHASE 4: Execute all batches with round-robin distribution
     try {
       const multicallResults = await this.multicallEngine.executeBatches(batches, chainId);
 
-      console.log(`✓ Multicall execution complete: ${multicallResults.length} results [${tickId}]`);
-
-      // PHASE 5: Block-aware pricing - skip computation if block unchanged
-      let blockAwareSavings = 0;
-      let computationsPerformed = 0;
-
-      // Process results: update cache and tier
       for (const result of multicallResults) {
-        if (result.success && result.data) {
-          const pool = poolController
-            .getAliveSet()
-            .find(p => p.address === result.poolAddress);
+        const pool = poolsDue.find(p => p.address.toLowerCase() === result.poolAddress.toLowerCase());
+        const registryPoolInfo = poolRegistry.pools[result.poolAddress.toLowerCase()];
 
-          // PHASE 5: Check if block number changed
-          if (result.blockNumber === pool?.lastBlockSeen && result.blockNumber !== 0) {
-            // Block unchanged - state unchanged, skip pricing computation
-            blockAwareSavings++;
-          } else {
-            // Block changed - recompute price
-            computationsPerformed++;
-            
-            console.log(`✓ [CACHE] Pool ${result.poolAddress.slice(0, 6)}... cached (sqrtPrice: ${result.data.sqrtPriceX96.toString().slice(0, 16)}...)`);
-
-            // PHASE 6: Update SharedStateCache for pricing engines
-            const poolKey = result.poolAddress.toLowerCase();
-            const poolStateData = {
-              address: poolKey,
-              token0: result.data.token0.toLowerCase(),
-              token1: result.data.token1.toLowerCase(),
-              sqrtPriceX96: BigInt(result.data.sqrtPriceX96.toString()),
-              liquidity: BigInt(result.data.liquidity.toString()),
-              tickId: tickId,
-              blockNumber: result.blockNumber,
-              lastUpdate: Date.now()
-            };
-            sharedStateCache.setPoolState(poolKey, poolStateData as any);
-            console.log(`✅ [CACHE] Updated state for ${poolKey.slice(0, 6)} (tick: ${tickId})`);
-
-            // Update pool tier based on price change
-            if (pool) {
-              // Compute price from sqrtPriceX96 (simplified)
-              const price = Math.sqrt(Number(result.data.sqrtPriceX96) / 2 ** 96);
-              poolController.updatePoolTier(result.poolAddress, price);
-              pool.lastBlockSeen = result.blockNumber;
-              pool.lastPrice = price;
-
-              console.log(
-                `  📊 ${result.poolAddress.slice(0, 6)}... → block ${result.blockNumber}, tier: ${pool.tier}`
-              );
-
-              // CORRECT PLACEMENT: Reset refCount only after full processing
-              poolController.resetPoolRefCount(pool.address, pool.chainId);
-            }
-          }
-        } else {
-          // Failed result - schedule retry
-          console.warn(
-            `⚠️ Multicall failed for pool ${result.poolAddress.slice(0, 6)}...`
-          );
+        if (!pool || !registryPoolInfo) continue;
+        
+        if (!result.success || !result.data) {
+          poolController.resetPoolRefCount(pool.address, pool.chainId);
+          continue;
         }
-      }
 
-      if (multicallResults.length > 0) {
-        const savingsPercent = Math.round(
-          (blockAwareSavings / multicallResults.length) * 100
-        );
-        console.log(
-          `📈 PHASE 5 Block-Aware Savings: ${blockAwareSavings}/${multicallResults.length} skipped pricing (${savingsPercent}% reduction)`
-        );
+        if (result.blockNumber === pool.lastBlockSeen && result.blockNumber !== 0) {
+          poolController.resetPoolRefCount(pool.address, pool.chainId);
+          continue;
+        }
+
+        let price: number = 0;
+        let poolStateForCache: Omit<PoolState, 'address'>;
+
+        if (pool.dexVersion === 'v2') {
+          const reserve0 = BigInt(result.data.reserve0.toString());
+          const reserve1 = BigInt(result.data.reserve1.toString());
+          poolStateForCache = {
+            token0: registryPoolInfo.token0.toLowerCase(),
+            token1: registryPoolInfo.token1.toLowerCase(),
+            reserve0, 
+            reserve1, 
+            tickId, 
+            blockNumber: result.blockNumber, 
+            timestamp: Date.now(),
+          };
+          if (reserve0 > 0) {
+            price = Number(reserve1 * BigInt(1e18) / reserve0) / 1e18;
+          }
+        } else { // v3, v4
+          const sqrtPriceX96 = BigInt(result.data.sqrtPriceX96.toString());
+          poolStateForCache = {
+            token0: registryPoolInfo.token0.toLowerCase(),
+            token1: registryPoolInfo.token1.toLowerCase(),
+            sqrtPriceX96, 
+            liquidity: BigInt(result.data.liquidity.toString()),
+            tickId, 
+            blockNumber: result.blockNumber, 
+            timestamp: Date.now(),
+          };
+          const priceRatio = Number(sqrtPriceX96) / (2 ** 96);
+          price = priceRatio * priceRatio;
+        }
+        
+        sharedStateCache.setPoolState(result.poolAddress.toLowerCase(), poolStateForCache as PoolState);
+
+        poolController.updatePoolTier(pool.address, price);
+        pool.lastBlockSeen = result.blockNumber;
+        pool.lastPrice = price;
+
+        poolController.resetPoolRefCount(pool.address, pool.chainId);
       }
     } catch (error) {
       console.error('❌ Multicall batch execution failed:', error);
-      // Schedule retry for all pools due
       for (const pool of poolsDue) {
-        pool.nextRefresh = Date.now() + 5000; // Retry in 5s
+        pool.nextRefresh = Date.now() + 5000;
       }
     }
   }
 
   /**
-   * PHASE 3: Stop the scheduler
-   * 
-   * Gracefully shuts down the execution loop.
+   * Stop the scheduler
    */
   async stop(): Promise<void> {
-    if (!this.isRunning) {
-      return;
-    }
+    if (!this.isRunning) return;
 
-    // PHASE 5: Clear collection window timer
     if (this.batchFlushTimer) {
       clearTimeout(this.batchFlushTimer);
       this.batchFlushTimer = null;
     }
 
-    // Flush any pending batch before stopping
     if (this.pendingPoolsForBatch.size > 0) {
       await this.flushBatch();
     }
@@ -383,7 +284,7 @@ export class PoolScheduler {
   }
 
   /**
-   * PHASE 3: Get scheduler status
+   * Get scheduler status
    */
   public isActive(): boolean {
     return this.isRunning;
@@ -400,13 +301,9 @@ export class PoolScheduler {
       low: aliveSet.filter(p => p.tier === 'low').length,
     };
 
-    // Calculate when next refreshes are due
     const now = Date.now();
     const nextRefreshes = aliveSet.map(p => p.nextRefresh - now);
-    const avgMsUntilRefresh =
-      nextRefreshes.length > 0
-        ? nextRefreshes.reduce((a, b) => a + b, 0) / nextRefreshes.length
-        : 0;
+    const avgMsUntilRefresh = nextRefreshes.length > 0 ? nextRefreshes.reduce((a, b) => a + b, 0) / nextRefreshes.length : 0;
 
     return {
       isRunning: this.isRunning,
@@ -418,7 +315,6 @@ export class PoolScheduler {
         normal_10s: byTier.normal,
         low_30s: byTier.low,
       },
-      // PHASE 5: Micro-batching metrics
       microBatching: {
         pendingPoolsInBatch: this.pendingPoolsForBatch.size,
         collectionWindowMs: this.collectionWindow,
