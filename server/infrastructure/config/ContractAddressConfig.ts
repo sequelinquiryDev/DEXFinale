@@ -9,23 +9,19 @@
 // Pool ABIs
 // -------------------
 
-// V2-style AMM pool
+// V2-style AMM pool (Uniswap V2, SushiSwap, QuickSwap)
 export const V2_POOL_ABI = [
-  "function getReserves() view returns (uint112 _reserve0, uint112 _reserve1, uint32 _blockTimestampLast)"
+  "function getReserves() view returns (uint112 reserve0, uint112 reserve1)"
 ];
 
-// V3-style AMM pool
+// V3-style AMM pool (Uniswap V3)
 export const V3_POOL_ABI = [
-  "function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
+  "function slot0() view returns (uint160 sqrtPriceX96, int24 tick)",
   "function liquidity() view returns (uint128)"
 ];
 
-// V4-style AMM pool (Uniswap V4)
-export const V4_POOL_ABI = [
-  "function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
-  "function liquidity() view returns (uint128)",
-  // Add any V4-specific hooks if needed
-];
+// V4-style AMM pool (Uniswap V4, treated same as V3 for spot pricing)
+export const V4_POOL_ABI = V3_POOL_ABI;
 
 // -------------------
 // Contract addresses per network
