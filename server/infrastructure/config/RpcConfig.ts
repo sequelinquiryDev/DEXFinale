@@ -2,7 +2,7 @@
  * RpcConfig - RPC Endpoint Configuration
  * 
  * RESPONSIBILITY: Manage RPC providers with round-robin load balancing
- * - Multiple RPC providers (Infura, Alchemy, etc.)
+ * - Multiple RPC providers (Infura, Alchemy, PublicPolygon)
  * - Both can query Ethereum and Polygon
  * - Round-robin selection for redundancy and load distribution
  * 
@@ -26,13 +26,13 @@ export interface RpcProvider {
 
 class RpcConfig {
   private static instance: RpcConfig;
-  
+
   // List of RPC providers (add more here easily)
   private providers: RpcProvider[] = [];
-  
+
   // Round-robin counters per chain
   private roundRobinCounters: Map<number, number> = new Map();
-  
+
   // Track if we've initialized
   private initialized: boolean = false;
 
@@ -40,11 +40,13 @@ class RpcConfig {
     // Don't initialize in constructor - do it lazily
   }
 
+  /**
+   * Singleton instance access
+   */
   public static getInstance(): RpcConfig {
     if (!RpcConfig.instance) {
       RpcConfig.instance = new RpcConfig();
     }
-    // Initialize on first call to getInstance
     if (!RpcConfig.instance.initialized) {
       RpcConfig.instance.initializeProviders();
       RpcConfig.instance.initializeCounters();
@@ -55,44 +57,46 @@ class RpcConfig {
 
   /**
    * Initialize all RPC providers
-   * ADD NEW PROVIDERS HERE
    */
   private initializeProviders(): void {
-    const infuraKey = process.env.INFURA_API_KEY;
-    const alchemyKey = process.env.ALCHEMY_API_KEY;
-    const polygonRpcUrl = process.env.POLYGON_RPC_URL;
+    const envVars = {
+      INFURA_API_KEY: process.env.INFURA_API_KEY,
+      ALCHEMY_API_KEY: process.env.ALCHEMY_API_KEY,
+      POLYGON_RPC_URL: process.env.POLYGON_RPC_URL,
+    };
+
+    // Deduplicate missing key warnings
+    Object.entries(envVars).forEach(([key, value]) => {
+      if (!value) console.warn(`⚠️ ${key} not provided. Some RPC features may be disabled.`);
+    });
 
     const providers: RpcProvider[] = [];
 
-    if (infuraKey) {
+    if (envVars.INFURA_API_KEY) {
       providers.push({
         name: 'Infura',
         endpoints: {
-          1: `https://mainnet.infura.io/v3/${infuraKey}`,
-          137: `https://polygon-mainnet.infura.io/v3/${infuraKey}`,
+          1: `https://mainnet.infura.io/v3/${envVars.INFURA_API_KEY}`,
+          137: `https://polygon-mainnet.infura.io/v3/${envVars.INFURA_API_KEY}`,
         },
       });
-    } else {
-      console.warn('INFURA_API_KEY not provided. Infura provider will be disabled.');
     }
 
-    if (alchemyKey) {
+    if (envVars.ALCHEMY_API_KEY) {
       providers.push({
         name: 'Alchemy',
         endpoints: {
-          1: `https://eth-mainnet.g.alchemy.com/v2/${alchemyKey}`,
-          137: `https://polygon-mainnet.g.alchemy.com/v2/${alchemyKey}`,
+          1: `https://eth-mainnet.g.alchemy.com/v2/${envVars.ALCHEMY_API_KEY}`,
+          137: `https://polygon-mainnet.g.alchemy.com/v2/${envVars.ALCHEMY_API_KEY}`,
         },
       });
-    } else {
-      console.warn('ALCHEMY_API_KEY not provided. Alchemy provider will be disabled.');
     }
 
-    if (polygonRpcUrl) {
+    if (envVars.POLYGON_RPC_URL) {
       providers.push({
         name: 'PublicPolygon',
         endpoints: {
-          137: polygonRpcUrl,
+          137: envVars.POLYGON_RPC_URL,
         },
       });
     }
@@ -100,10 +104,18 @@ class RpcConfig {
     this.providers = providers;
 
     if (providers.length === 0) {
-      console.warn('⚠️ RpcConfig: No RPC providers configured. Set INFURA_API_KEY or ALCHEMY_API_KEY or POLYGON_RPC_URL in environment.');
+      console.warn('⚠️ RpcConfig: No RPC providers configured. Set INFURA_API_KEY, ALCHEMY_API_KEY, or POLYGON_RPC_URL.');
     } else {
       console.log(`✓ RpcConfig: Initialized ${this.providers.length} RPC providers: ${this.getAvailableProviders().join(', ')}`);
     }
+  }
+
+  /**
+   * Initialize round-robin counters for each chain
+   */
+  private initializeCounters(): void {
+    this.roundRobinCounters.set(1, 0);   // Ethereum
+    this.roundRobinCounters.set(137, 0); // Polygon
   }
 
   /**
@@ -113,14 +125,7 @@ class RpcConfig {
     this.providers = [];
     this.initializeProviders();
     this.initializeCounters();
-  }
-
-  /**
-   * Initialize round-robin counters for each chain
-   */
-  private initializeCounters(): void {
-    this.roundRobinCounters.set(1, 0);   // Ethereum
-    this.roundRobinCounters.set(137, 0); // Polygon
+    this.initialized = true;
   }
 
   /**
@@ -218,7 +223,7 @@ class RpcConfig {
   }
 }
 
-// Export getInstance function instead of calling it immediately
+// Export getInstance function
 export function getRpcConfig(): RpcConfig {
   return RpcConfig.getInstance();
 }
