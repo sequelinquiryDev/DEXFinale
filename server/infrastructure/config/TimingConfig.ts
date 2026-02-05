@@ -6,9 +6,9 @@
  * 
  * TIMING HIERARCHY:
  * - Stay-alive protocol: 30s (client-side, user watching)
- * - Pool refresh: 1s (main loop check), 5-30s per pool (tiered)
+ * - Pool refresh: 10s (main loop check), 5-30s per pool (tiered)
  * - Micro-batching: 75ms collection window
- * - GC cleanup: Various intervals (10s state, 30s pools, 1h logos)
+ * - GC cleanup: Various intervals (10s state, 30s pools, 30d logos)
  * - Discovery retry: 5 minutes between discovery attempts
  * - Topology TTL: 7 days before refresh
  */
@@ -24,11 +24,11 @@ export const timingConfig = {
   QUARANTINE_TTL_MS: 7 * 24 * 60 * 60 * 1000, // 7 days
 
   // === Pool Lifecycle ===
-  POOL_GRACE_PERIOD_MS: 20 * 1000, // 20 seconds before removal after refCount=0
+  POOL_GRACE_PERIOD_MS: 10 * 1000, // 10 seconds before removal after refCount=0
   TOPOLOGY_TTL_MS: 7 * 24 * 60 * 60 * 1000, // 7 days before topology refresh
 
   // === Micro-batching ===
-  MICROBATCH_COLLECTION_WINDOW_MS: 75, // Milliseconds to collect pools before multicall
+  MICROBATCH_COLLECTION_WINDOW_MS: 150, // Milliseconds to collect pools before multicall
 
   // === Discovery ===
   DISCOVERY_RETRY_WINDOW_MS: 5 * 60 * 1000, // 5 minutes between discovery attempts for same token
@@ -41,7 +41,7 @@ export const timingConfig = {
   // === GC Cleanup Intervals ===
   STATE_CLEANUP_INTERVAL_MS: 10 * 1000, // Every 10 seconds
   POOL_CLEANUP_INTERVAL_MS: 30 * 1000, // Every 30 seconds
-  LOGO_CLEANUP_INTERVAL_MS: 60 * 60 * 1000, // Every 1 hour
+  LOGO_CLEANUP_INTERVAL_MS: 30 * 24 * 60 * 60 * 1000, // 30 days
   QUARANTINE_CLEANUP_INTERVAL_MS: 60 * 60 * 1000, // Every 1 hour
   TOPOLOGY_REFRESH_INTERVAL_MS: 7 * 24 * 60 * 60 * 1000, // Every 7 days
 
