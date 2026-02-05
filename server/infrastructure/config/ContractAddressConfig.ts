@@ -1,4 +1,3 @@
-
 /**
  * ContractAddressConfig
  * 
@@ -6,72 +5,96 @@
  * Organized by network and purpose.
  */
 
-// ABI definitions in human-readable format for ethers.js
-// These are generic for any V2-style Automated Market Maker (AMM)
+// -------------------
+// Pool ABIs
+// -------------------
+
+// V2-style AMM pool
 export const V2_POOL_ABI = [
   "function getReserves() view returns (uint112 _reserve0, uint112 _reserve1, uint32 _blockTimestampLast)"
 ];
 
-// These are generic for any V3-style Automated Market Maker (AMM)
+// V3-style AMM pool
 export const V3_POOL_ABI = [
   "function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
   "function liquidity() view returns (uint128)"
 ];
 
+// V4-style AMM pool (Uniswap V4)
+export const V4_POOL_ABI = [
+  "function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
+  "function liquidity() view returns (uint128)",
+  // Add any V4-specific hooks if needed
+];
 
+// -------------------
+// Contract addresses per network
+// -------------------
 interface ContractAddresses {
   multicall: string;
 }
 
-const CONTRACT_ADDRESSES: {
-  ethereum: ContractAddresses;
-  polygon: ContractAddresses;
-  [key: string]: ContractAddresses;
-} = {
+const CONTRACT_ADDRESSES: Record<string, ContractAddresses> = {
   ethereum: {
-    // Multicall3: Universal multicall contract across all networks
     multicall: "0xca11bde05977b3631167028862be2a173976ca11",
-      },
-  
+  },
   polygon: {
-    // Multicall3: Same address on Polygon
     multicall: "0xca11bde05977b3631167028862be2a173976ca11",
   },
 };
 
-/**
- * Get contract address for a specific network.
- * This function only supports Ethereum Mainnet (1) and Polygon Mainnet (137).
- * @param chainId - Network chain ID (1 for Ethereum, 137 for Polygon)
- * @param contract - Contract name ('multicall')
- * @returns Contract address
- * @throws If the chainId is not 1 or 137.
- */
+// -------------------
+// Supported networks mapping
+// -------------------
+export const SUPPORTED_NETWORKS: Record<number, string> = {
+  1: "ethereum",
+  137: "polygon",
+};
+
+// -------------------
+// Utility to parse chain ID
+// Supports number, decimal string, or hex string (0x-prefixed)
+// -------------------
+function parseChainId(chainId: number | string): number {
+  if (typeof chainId === "number") return chainId;
+  if (typeof chainId === "string") {
+    if (chainId.startsWith("0x") || chainId.startsWith("0X")) {
+      return parseInt(chainId, 16); // Hex string
+    } else {
+      return parseInt(chainId, 10); // Decimal string
+    }
+  }
+  throw new Error(`Invalid chainId type: ${typeof chainId}`);
+}
+
+// -------------------
+// Get contract address by network
+// -------------------
 export function getContractAddress(
   chainId: number | string,
   contract: keyof ContractAddresses
 ): string {
-  const id = typeof chainId === 'string' ? parseInt(chainId, 10) : chainId;
-  
-  let networkKey: string;
-  if (id === 1) {
-    // Ethereum mainnet
-    networkKey = 'ethereum';
-  } else if (id === 137) {
-    // Polygon mainnet
-    networkKey = 'polygon';
-  } else {
-    // Explicitly block any other chain to prevent silent errors.
-    throw new Error(`Unsupported chainId: ${id}. Only Ethereum Mainnet (1) and Polygon Mainnet (137) are configured.`);
+  const id = parseChainId(chainId);
+  const networkKey = SUPPORTED_NETWORKS[id];
+
+  if (!networkKey) {
+    throw new Error(`Unsupported chainId: ${id}. Supported networks: ${Object.keys(SUPPORTED_NETWORKS).join(", ")}`);
   }
-  
+
   const address = CONTRACT_ADDRESSES[networkKey][contract];
   if (!address) {
-    // This should not be reachable if the networkKey is valid, but serves as a safeguard.
-    throw new Error(`Contract '${contract}' is not configured for network '${networkKey}'.`);
+    throw new Error(`Contract '${contract}' is not configured for network '${networkKey}'`);
   }
-  
+
   return address;
 }
 
+// -------------------
+// Export everything
+// -------------------
 export const ContractAddressConfig = CONTRACT_ADDRESSES;
+export const PoolABIs = {
+  v2: V2_POOL_ABI,
+  v3: V3_POOL_ABI,
+  v4: V4_POOL_ABI,
+};
