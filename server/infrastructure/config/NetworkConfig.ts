@@ -1,3 +1,4 @@
+import { Token } from "../../../../shared/schema";
 /**
  * NetworkConfig - Network Definitions and Constants
  * 
@@ -27,20 +28,15 @@ export interface NetworkDefinition {
   rpcUrl: string;
   
   // Reference stablecoins for pricing
-  stablecoins: {
-    address: string;
-    symbol: string;
-    decimals: number;
-  }[];
+  stablecoins: Token[];
   
   // Reference tokens for common pairs
-  wrappedNative: {
-    address: string;
-    symbol: string;
-    decimals: number;
-  };
+  wrappedNative: Token;
+
+  // Base tokens for liquidity discovery
+  baseTokens: string[];
   
-  // Block explorer
+  // Block explorer details
   blockExplorer: {
     name: string;
     url: string;
@@ -76,35 +72,43 @@ class NetworkConfig {
    * Ethereum Mainnet configuration
    */
   private getEthereumConfig(): NetworkDefinition {
+    const stablecoins: Token[] = [
+        {
+          address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
+          symbol: 'USDC',
+          name: "USD Coin",
+          decimals: 6,
+        },
+        {
+          address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', // DAI
+          symbol: 'DAI',
+          name: "Dai",
+          decimals: 18,
+        },
+        {
+          address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
+          symbol: 'USDT',
+          name: "Tether",
+          decimals: 6,
+        },
+      ];
+    const wrappedNative: Token = {
+        address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
+        symbol: 'WETH',
+        name: "Wrapped Ether",
+        decimals: 18,
+      };
     return {
       chainId: ChainId.ETHEREUM,
       name: 'Ethereum',
       symbol: 'ETH',
       rpcUrl: 'https://mainnet.infura.io/v3/', // Will be completed by ProvidersConfig
       
-      stablecoins: [
-        {
-          address: '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48', // USDC
-          symbol: 'USDC',
-          decimals: 6,
-        },
-        {
-          address: '0x6B175474E89094C44Da98b954EedeAC495271d0F', // DAI
-          symbol: 'DAI',
-          decimals: 18,
-        },
-        {
-          address: '0xdAC17F958D2ee523a2206206994597C13D831ec7', // USDT
-          symbol: 'USDT',
-          decimals: 6,
-        },
-      ],
+      stablecoins,
       
-      wrappedNative: {
-        address: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', // WETH
-        symbol: 'WETH',
-        decimals: 18,
-      },
+      wrappedNative,
+
+      baseTokens: [...stablecoins.map(t => t.address), wrappedNative.address],
       
       blockExplorer: {
         name: 'Etherscan',
@@ -123,30 +127,45 @@ class NetworkConfig {
    * Polygon Mainnet configuration
    */
   private getPolygonConfig(): NetworkDefinition {
+    const stablecoins: Token[] = [
+        {
+          address: '0x2791Bca1f2de4661ED88A30C99a7a9449Aa84174', // USDC (Polygon)
+          symbol: 'USDC',
+          name: "USD Coin",
+          decimals: 6,
+        },
+        {
+          address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', // USDT (Polygon)
+          symbol: 'USDT',
+          name: "Tether",
+          decimals: 6,
+        },
+        {
+          address: '0x8f3cf7ad23cd3cadbd9735aff958023d60d76ee6',
+          symbol: 'DAI',
+          name: 'Dai',
+          decimals: 18,
+        }
+      ];
+
+    const wrappedNative: Token = {
+        address: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // WMATIC
+        symbol: 'WMATIC',
+        name: "Wrapped Matic",
+        decimals: 18,
+      };
+
     return {
       chainId: ChainId.POLYGON,
       name: 'Polygon',
       symbol: 'MATIC',
       rpcUrl: 'https://polygon-rpc.com',
       
-      stablecoins: [
-        {
-          address: '0x2791Bca1f2de4661ED88A30C99a7a9449Aa84174', // USDC (Polygon)
-          symbol: 'USDC',
-          decimals: 6,
-        },
-        {
-          address: '0xc2132D05D31c914a87C6611C10748AEb04B58e8F', // USDT (Polygon)
-          symbol: 'USDT',
-          decimals: 6,
-        },
-      ],
+      stablecoins,
       
-      wrappedNative: {
-        address: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // WMATIC
-        symbol: 'WMATIC',
-        decimals: 18,
-      },
+      wrappedNative,
+
+      baseTokens: [...stablecoins.map(t => t.address), wrappedNative.address],
       
       blockExplorer: {
         name: 'PolygonScan',
@@ -172,6 +191,11 @@ class NetworkConfig {
       throw new Error(`Network with chain ID ${chainId} not found`);
     }
     return network;
+  }
+
+  public getBaseTokenAddresses(chainId: number): Set<string> {
+    const network = this.getNetwork(chainId);
+    return new Set(network.baseTokens.map(t => t.toLowerCase()));
   }
 
   /**
@@ -218,7 +242,7 @@ class NetworkConfig {
    * @param chainId Network chain ID
    * @returns Array of stablecoins on this network
    */
-  public getStablecoins(chainId: ChainId | number) {
+  public getStablecoins(chainId: ChainId | number): Token[] {
     const network = this.getNetwork(chainId);
     return network.stablecoins;
   }
@@ -240,7 +264,7 @@ class NetworkConfig {
    */
   public getPrimaryStablecoin(chainId: ChainId | number) {
     const network = this.getNetwork(chainId);
-    // Prefer USDC, then USDT, then first available
+    // Prefer USDC, then USDT, then first. If those don't exist, return the first one
     return (
       network.stablecoins.find(s => s.symbol === 'USDC') ||
       network.stablecoins.find(s => s.symbol === 'USDT') ||
@@ -252,7 +276,7 @@ class NetworkConfig {
    * Get block explorer URL for a token
    * @param chainId Network chain ID
    * @param tokenAddress Token contract address
-   * @returns Full block explorer URL for the token
+   * @returns Full block explorer URL for the. token
    */
   public getTokenExplorerUrl(chainId: ChainId | number, tokenAddress: string): string {
     const network = this.getNetwork(chainId);

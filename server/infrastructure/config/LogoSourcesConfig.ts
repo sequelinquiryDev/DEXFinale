@@ -5,6 +5,8 @@
  * Used as fallback sources when explorer APIs don't return logos
  */
 
+import { ChainId } from "./NetworkConfig";
+
 export interface LogoSource {
   name: string;
   baseUrl: string;
@@ -79,11 +81,8 @@ export const logoSourcesConfig = {
  * Chain name mappings for Trust Wallet (uses different names than chainId)
  */
 export const trustWalletChainNames: Record<number, string> = {
-  1: 'ethereum',
-  137: 'polygon',
-  42161: 'arbitrum',
-  10: 'optimism',
-  8453: 'base',
+  [ChainId.ETHEREUM]: 'ethereum',
+  [ChainId.POLYGON]: 'polygon',
 };
 
 /**

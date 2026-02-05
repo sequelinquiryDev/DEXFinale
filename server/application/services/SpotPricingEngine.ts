@@ -2,39 +2,32 @@
 import { sharedStateCache } from './SharedStateCache';
 import { storageService } from './StorageService';
 import { EthersAdapter } from '../../infrastructure/adapters/EthersAdapter';
-
-// Known USD stablecoins for price anchoring
-const USD_STABLECOINS: Record<number, Set<string>> = {
-  1: new Set([
-    '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', // USDC
-    '0xdac17f958d2ee523a2206206994597c13d831ec7', // USDT
-    '0x6b175474e89094c44da98b954eedeac495271d0f', // DAI
-  ]),
-  137: new Set([
-    '0x2791bca1f2de4661ed88a30c99a7a9449aa84174', // USDC
-    '0xc2132d05d31c914a87c6611c10748aeb04b58e8f', // USDT
-    '0x8f3cf7ad23cd3cadbd9735aff958023d60d76ee6', // DAI
-  ]),
-};
-
-// Token decimals lookup
-const TOKEN_DECIMALS: Record<string, number> = {
-  // Ethereum
-  '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48': 6,  // USDC
-  '0xdac17f958d2ee523a2206206994597c13d831ec7': 6,  // USDT
-  '0x6b175474e89094c44da98b954eedeac495271d0f': 18, // DAI
-  '0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2': 18, // WETH
-  '0x2260fac5e5542a773aa44fbcfedd86a9abde89b6': 8,  // WBTC
-  // Polygon
-  '0x2791bca1f2de4661ed88a30c99a7a9449aa84174': 6,  // USDC
-  '0xc2132d05d31c914a87c6611c10748aeb04b58e8f': 6,  // USDT
-  '0x8f3cf7ad23cd3cadbd9735aff958023d60d76ee6': 18, // DAI
-  '0x7ceb23fd6bc0add59e62ac25578270cff1b9f619': 18, // WETH
-  '0x0d500b1d8e8ef31e21c99d1db9a6444d3adf1270': 18, // WMATIC
-};
+import { networkConfig } from '../../infrastructure/config/NetworkConfig';
 
 class SpotPricingEngine {
+  private tokenDecimals: Map<string, number> = new Map();
+  private usdStablecoins: Set<string> = new Set();
+
   constructor(private ethersAdapter: EthersAdapter) {}
+
+  public async initialize(): Promise<void> {
+    console.log("[SPOT-PRICING] Initializing spot pricing engine...");
+    const chainIds = networkConfig.getSupportedChainIds();
+
+    for (const chainId of chainIds) {
+        const tokens = await storageService.getTokensByNetwork(chainId);
+        const stablecoins = networkConfig.getStablecoins(chainId);
+
+        for (const token of tokens) {
+            this.tokenDecimals.set(token.address.toLowerCase(), token.decimals);
+        }
+
+        for (const stable of stablecoins) {
+            this.usdStablecoins.add(stable.address.toLowerCase());
+        }
+    }
+    console.log(`[SPOT-PRICING] Initialization complete. Loaded token data for ${chainIds.length} chains.`);
+  }
 
   /**
    * Build a symbol-to-address map for a given chain
@@ -69,11 +62,11 @@ class SpotPricingEngine {
    */
   private getDecimals(tokenAddress: string): number {
     const normalized = tokenAddress.toLowerCase();
-    // Check hardcoded lookup first
-    if (TOKEN_DECIMALS[normalized] !== undefined) {
-      return TOKEN_DECIMALS[normalized];
+    // Check local cache first
+    if (this.tokenDecimals.has(normalized)) {
+      return this.tokenDecimals.get(normalized)!;
     }
-    // Try to get from cache
+    // Try to get from shared cache as a fallback
     const metadata = sharedStateCache.getTokenMetadata(tokenAddress);
     return metadata?.decimals ?? 18;
   }
@@ -81,8 +74,8 @@ class SpotPricingEngine {
   /**
    * Check if token is a USD stablecoin
    */
-  private isUsdStablecoin(tokenAddress: string, chainId: number): boolean {
-    return USD_STABLECOINS[chainId]?.has(tokenAddress.toLowerCase()) ?? false;
+  private isUsdStablecoin(tokenAddress: string): boolean {
+    return this.usdStablecoins.has(tokenAddress.toLowerCase());
   }
 
   /**
@@ -95,17 +88,17 @@ class SpotPricingEngine {
    * 
    * @param tokenAddress The address of the token to price.
    * @param chainId The chain ID of the token.
+   * @param pricingStack The stack of tokens being priced, to prevent circular dependencies.
    * @returns The spot price in USD, or null if it cannot be calculated.
    */
-  public async computeSpotPrice(tokenAddress: string, chainId: number): Promise<number | null> {
+  public async computeSpotPrice(tokenAddress: string, chainId: number, pricingStack: string[] = []): Promise<number | null> {
     const normalizedToken = tokenAddress.toLowerCase();
     const tokenShort = tokenAddress.slice(0, 6);
 
-    // If it's a stablecoin, return $1
-    if (this.isUsdStablecoin(normalizedToken, chainId)) {
-      console.log(`✓ [PRICING] ${tokenShort}... is USD stablecoin → $1.00`);
-      console.log(`[LOG-PRICING-RESULT] ${tokenShort}... RETURNING: 1.0 (stablecoin)`);
-      return 1.0;
+    // Prevent circular dependencies
+    if (pricingStack.includes(normalizedToken)) {
+      console.warn(`[PRICING] Circular dependency detected, aborting: ${pricingStack.join(' -> ')} -> ${normalizedToken}`);
+      return null;
     }
 
     // Get pricing routes from pool registry
@@ -113,6 +106,10 @@ class SpotPricingEngine {
     const tokenRoutes = poolRegistry.pricingRoutes[normalizedToken];
 
     if (!tokenRoutes || Object.keys(tokenRoutes).length === 0) {
+      // If it's a stablecoin and has no other routes, we can confidently return 1.0 as a fallback
+      if (this.isUsdStablecoin(normalizedToken)) {
+          return 1.0;
+      }
       console.log(`❌ [PRICING] ${tokenShort}... on chain ${chainId} → NO ROUTES (not discovered)`);
       console.log(`[LOG-PRICING-RESULT] ${tokenShort}... RETURNING: null (no routes)`);
       return null;
@@ -134,7 +131,7 @@ class SpotPricingEngine {
     for (const baseSymbol in tokenRoutes) {
       const baseAddress = symbolMap.get(baseSymbol);
       if (!baseAddress) continue;
-      if (!this.isUsdStablecoin(baseAddress, chainId)) continue;
+      if (!this.isUsdStablecoin(baseAddress)) continue;
 
       // This base is a USD stablecoin, try to fetch pool state
       const poolAddresses = tokenRoutes[baseSymbol];
@@ -157,7 +154,7 @@ class SpotPricingEngine {
     // Strategy 2: If no stablecoin route available, try WETH
     if (!bestPoolAddress) {
       console.log(`🔍 [PRICING] ${tokenShort}... checking strategy 2 (WETH base)`);
-      const wethSymbol = 'WETH';
+      const wethSymbol = networkConfig.getWrappedNative(chainId).symbol;
       if (tokenRoutes[wethSymbol]) {
         const poolAddresses = tokenRoutes[wethSymbol];
         for (const poolAddr of poolAddresses) {
@@ -233,14 +230,14 @@ class SpotPricingEngine {
     let priceInBaseToken = isToken0 ? rawPrice : (rawPrice > 0 ? 1 / rawPrice : 0);
 
     // If the base token is a USD stablecoin, this is the USD price
-    if (this.isUsdStablecoin(bestBaseAddress, chainId)) {
+    if (this.isUsdStablecoin(bestBaseAddress)) {
       console.log(`✓ [PRICING] ${tokenShort}... → $${priceInBaseToken.toFixed(6)} (stablecoin base)`);
       return priceInBaseToken;
     }
 
     // Otherwise, recursively get the USD price of the base token
     console.log(`⚠️ [PRICING] ${tokenShort}... recursing for base token ${bestBaseSymbol} (${bestBaseAddress.slice(0, 6)}...)`);
-    const baseUsdPrice = await this.computeSpotPrice(bestBaseAddress, chainId);
+    const baseUsdPrice = await this.computeSpotPrice(bestBaseAddress, chainId, [...pricingStack, normalizedToken]);
     if (baseUsdPrice === null) {
       console.log(`❌ [PRICING] ${tokenShort}... → RECURSIVE BASE PRICE FAILED`);
       return null;
@@ -254,8 +251,11 @@ class SpotPricingEngine {
 
 let spotPricingEngineInstance: SpotPricingEngine | null = null;
 
-export function initSpotPricingEngine(ethersAdapter: EthersAdapter): SpotPricingEngine {
-  spotPricingEngineInstance = new SpotPricingEngine(ethersAdapter);
+export async function initSpotPricingEngine(ethersAdapter: EthersAdapter): Promise<SpotPricingEngine> {
+  if (!spotPricingEngineInstance) {
+    spotPricingEngineInstance = new SpotPricingEngine(ethersAdapter);
+    await spotPricingEngineInstance.initialize();
+  }
   return spotPricingEngineInstance;
 }
 
@@ -264,6 +264,7 @@ export const spotPricingEngine = {
     if (!spotPricingEngineInstance) {
       throw new Error('SpotPricingEngine not initialized. Call initSpotPricingEngine first.');
     }
-    return spotPricingEngineInstance.computeSpotPrice(tokenAddress, chainId);
+    // Initialize the pricing stack for the top-level call
+    return spotPricingEngineInstance.computeSpotPrice(tokenAddress, chainId, []);
   }
 };

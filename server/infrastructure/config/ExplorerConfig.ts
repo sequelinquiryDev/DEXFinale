@@ -1,3 +1,5 @@
+import { ChainId, networkConfig } from "./NetworkConfig";
+
 export interface ExplorerApi {
   name: string;
   baseUrl: string;
@@ -30,38 +32,36 @@ class ExplorerConfig {
   private initializeExplorers(): void {
     // Centralized API key map
     const explorerKeys: Record<string, string | undefined> = {
-      ETHERSCAN: process.env.ETHERSCAN_API_KEY,
-      POLYGONSCAN: process.env.POLYGONSCAN_API_KEY || process.env.ETHERSCAN_API_KEY,
+      [ChainId.ETHEREUM]: process.env.ETHERSCAN_API_KEY,
+      [ChainId.POLYGON]: process.env.POLYGONSCAN_API_KEY || process.env.ETHERSCAN_API_KEY,
     };
 
     // Warn for missing keys
-    for (const [name, key] of Object.entries(explorerKeys)) {
-      if (!key) console.warn(`${name}_API_KEY not set. Some explorer API features may be limited.`);
+    if (!explorerKeys[ChainId.ETHEREUM]) console.warn(`ETHERSCAN_API_KEY not set. Some explorer API features may be limited.`);
+    if (!explorerKeys[ChainId.POLYGON]) console.warn(`POLYGONSCAN_API_KEY not set. Some explorer API features may be limited.`);
+
+    const supportedChains = networkConfig.getSupportedChainIds();
+
+    for (const chainId of supportedChains) {
+      const network = networkConfig.getNetwork(chainId);
+      if (!network) continue;
+
+      const apiKey = explorerKeys[chainId] || "";
+      // Construct the API base URL from the general block explorer URL
+      // e.g., https://etherscan.io -> https://api.etherscan.io/api
+      const apiUrl = network.blockExplorer.url.replace("//", "//api.") + "/api";
+
+      this.explorers.set(chainId, {
+        name: network.blockExplorer.name,
+        baseUrl: apiUrl,
+        apiKey: apiKey,
+        endpoints: {
+          tokenInfo: network.blockExplorer.tokenUrl, // From networkConfig
+          tokenHolders: network.blockExplorer.tokenUrl, // From networkConfig
+          transactionHistory: `${network.blockExplorer.url}/tx/`,
+        },
+      });
     }
-
-    // Ethereum Mainnet - Etherscan
-    this.explorers.set(1, {
-      name: "Etherscan",
-      baseUrl: "https://api.etherscan.io/api",
-      apiKey: explorerKeys.ETHERSCAN || "",
-      endpoints: {
-        tokenInfo: "https://etherscan.io/token/",
-        tokenHolders: "https://etherscan.io/token/",
-        transactionHistory: "https://etherscan.io/tx/",
-      },
-    });
-
-    // Polygon Mainnet - PolygonScan
-    this.explorers.set(137, {
-      name: "PolygonScan",
-      baseUrl: "https://api.polygonscan.com/api",
-      apiKey: explorerKeys.POLYGONSCAN || "",
-      endpoints: {
-        tokenInfo: "https://polygonscan.com/token/",
-        tokenHolders: "https://polygonscan.com/token/",
-        transactionHistory: "https://polygonscan.com/tx/",
-      },
-    });
 
     console.log(`✓ ExplorerConfig: Initialized ${this.explorers.size} block explorers`);
   }

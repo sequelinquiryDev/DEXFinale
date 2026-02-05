@@ -13,8 +13,9 @@
 import { StorageService } from './StorageService';
 import { Token } from '../../domain/entities';
 import { PoolRegistry, PoolMetadata } from '../../domain/types';
-import { getSubgraphConfig, BASE_TOKENS, SubgraphConfig } from '../../infrastructure/config/SubgraphConfig';
+import { getSubgraphConfig, SubgraphConfig } from '../../infrastructure/config/SubgraphConfig';
 import { timingConfig } from '../../infrastructure/config/TimingConfig';
+import { networkConfig } from '../../infrastructure/config/NetworkConfig';
 
 interface DiscoveryAttempt {
   tokenAddress: string;
@@ -74,7 +75,7 @@ export class TokenDiscoveryManager {
     }
 
     // Build a map of base token addresses to symbols for quick lookup
-    const baseTokenAddresses = BASE_TOKENS[chainId] || [];
+    const baseTokenAddresses = Array.from(networkConfig.getBaseTokenAddresses(chainId));
     const baseTokenMap = new Map<string, string>();
     
     // Load all tokens to build symbol lookup
@@ -274,7 +275,7 @@ export class TokenDiscoveryManager {
     subgraph: SubgraphConfig,
     chainId: number
   ): Promise<SubgraphPool[]> {
-    const baseTokens = BASE_TOKENS[chainId] || [];
+    const baseTokens = Array.from(networkConfig.getBaseTokenAddresses(chainId));
     const tokenLower = tokenAddress.toLowerCase();
     const baseTokensLower = baseTokens.map(t => t.toLowerCase());
 

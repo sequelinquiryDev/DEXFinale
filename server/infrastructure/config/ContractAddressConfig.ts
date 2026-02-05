@@ -5,6 +5,8 @@
  * Organized by network and purpose.
  */
 
+import { networkConfig } from "./NetworkConfig";
+
 // -------------------
 // Pool ABIs
 // -------------------
@@ -44,14 +46,6 @@ export const MULTICALL_ABI = [
 ];
 
 // -------------------
-// Supported networks mapping
-// -------------------
-export const SUPPORTED_NETWORKS: Record<number, string> = {
-  1: "ethereum",
-  137: "polygon",
-};
-
-// -------------------
 // Utility to parse chain ID
 // Supports number, decimal string, or hex string (0x-prefixed)
 // -------------------
@@ -75,13 +69,13 @@ export function getContractAddress(
   contract: keyof ContractAddresses
 ): string {
   const id = parseChainId(chainId);
-  const networkKey = SUPPORTED_NETWORKS[id];
-
-  if (!networkKey) {
-    throw new Error(`Unsupported chainId: ${id}. Supported networks: ${Object.keys(SUPPORTED_NETWORKS).join(", ")}`);
+  if (!networkConfig.isChainSupported(id)) {
+    throw new Error(`Unsupported chainId: ${id}.`);
   }
 
-  const address = CONTRACT_ADDRESSES[networkKey][contract];
+  const networkKey = networkConfig.getNetwork(id).name.toLowerCase();
+  const address = CONTRACT_ADDRESSES[networkKey]?.[contract];
+  
   if (!address) {
     throw new Error(`Contract '${contract}' is not configured for network '${networkKey}'`);
   }

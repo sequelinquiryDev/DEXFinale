@@ -1,68 +1,83 @@
 /**
- * RpcConfig - RPC Endpoint Configuration
+ * RpcConfig - Centralized RPC Provider Configuration
  * 
- * RESPONSIBILITY: Manage RPC providers with round-robin load balancing
- * - Multiple RPC providers (Infura, Alchemy, PublicPolygon)
- * - Both can query Ethereum and Polygon
- * - Round-robin selection for redundancy and load distribution
+ * RESPONSIBILITY: Consolidate all RPC provider information
+ * - Read API keys from environment variables
+ * - Build provider endpoints for all supported chains
+ * - Provide a consistent interface for accessing RPC endpoints
  * 
- * ROUND-ROBIN LOGIC:
- * - Maintains counter per chain
- * - Cycles through available providers
- * - Ensures even distribution of requests
- * 
- * ADDING NEW RPCS:
- * 1. Add provider name to PROVIDERS array
- * 2. Add endpoint URLs to providers config
- * 3. Done - round-robin automatically includes it
+ * GOAL: Decouple RPC provider logic from application services
+ * - Services request an RPC endpoint for a chain, not a specific provider
+ * - Easy to add/remove/prioritize providers without service-level changes
  */
+
+import { networkConfig, ChainId } from "./NetworkConfig";
 
 export interface RpcProvider {
   name: string;
   endpoints: {
-    [chainId: number]: string;
+    [key in ChainId]?: string;
   };
 }
 
 class RpcConfig {
   private static instance: RpcConfig;
-
-  // List of RPC providers (add more here easily)
   private providers: RpcProvider[] = [];
-
-  // Round-robin counters per chain
-  private roundRobinCounters: Map<number, number> = new Map();
-
-  // Track if we've initialized
-  private initialized: boolean = false;
+  private roundRobinIndex: Map<number, number> = new Map();
 
   private constructor() {
-    // Don't initialize in constructor - do it lazily
+    this.loadProviders();
   }
 
-  /**
-   * Singleton instance access
-   */
   public static getInstance(): RpcConfig {
     if (!RpcConfig.instance) {
       RpcConfig.instance = new RpcConfig();
-    }
-    if (!RpcConfig.instance.initialized) {
-      RpcConfig.instance.initializeProviders();
-      RpcConfig.instance.initializeCounters();
-      RpcConfig.instance.initialized = true;
     }
     return RpcConfig.instance;
   }
 
   /**
-   * Initialize all RPC providers
+   * Get the next available RPC endpoint for a chain in round-robin fashion
+   * 
+   * @param chainId The ID of the chain
+   * @returns The RPC endpoint URL
    */
-  private initializeProviders(): void {
+  public getRpcEndpoint(chainId: number): string {
+    const availableProviders = this.providers.filter(
+      (p) => p.endpoints[chainId as ChainId]
+    );
+
+    if (availableProviders.length === 0) {
+      // As a last resort, fall back to the public RPC URL from NetworkConfig
+      console.warn(`⚠️ No dedicated RPC provider found for chain ${chainId}. Using public RPC.`)
+      const network = networkConfig.getNetwork(chainId);
+      return network.rpcUrl;
+    }
+
+    // Initialize round-robin index if not present
+    if (!this.roundRobinIndex.has(chainId)) {
+      this.roundRobinIndex.set(chainId, 0);
+    }
+
+    // Get current index and provider
+    const currentIndex = this.roundRobinIndex.get(chainId)!;
+    const provider = availableProviders[currentIndex];
+
+    // Update index for next call
+    this.roundRobinIndex.set(chainId, (currentIndex + 1) % availableProviders.length);
+
+    return provider.endpoints[chainId as ChainId]!;
+  }
+
+  /**
+   * Load providers from environment variables
+   * Best-effort: if a key is missing, that provider is simply disabled
+   */
+  private loadProviders(): void {
     const envVars = {
       INFURA_API_KEY: process.env.INFURA_API_KEY,
       ALCHEMY_API_KEY: process.env.ALCHEMY_API_KEY,
-      POLYGON_RPC_URL: process.env.POLYGON_RPC_URL,
+      POLYGON_RPC_URL: process.env.POLYGON_RPC_URL, // Optional public RPC
     };
 
     // Deduplicate missing key warnings
@@ -76,8 +91,8 @@ class RpcConfig {
       providers.push({
         name: 'Infura',
         endpoints: {
-          1: `https://mainnet.infura.io/v3/${envVars.INFURA_API_KEY}`,
-          137: `https://polygon-mainnet.infura.io/v3/${envVars.INFURA_API_KEY}`,
+          [ChainId.ETHEREUM]: `https://mainnet.infura.io/v3/${envVars.INFURA_API_KEY}`,
+          [ChainId.POLYGON]: `https://polygon-mainnet.infura.io/v3/${envVars.INFURA_API_KEY}`,
         },
       });
     }
@@ -86,8 +101,8 @@ class RpcConfig {
       providers.push({
         name: 'Alchemy',
         endpoints: {
-          1: `https://eth-mainnet.g.alchemy.com/v2/${envVars.ALCHEMY_API_KEY}`,
-          137: `https://polygon-mainnet.g.alchemy.com/v2/${envVars.ALCHEMY_API_KEY}`,
+          [ChainId.ETHEREUM]: `https://eth-mainnet.g.alchemy.com/v2/${envVars.ALCHEMY_API_KEY}`,
+          [ChainId.POLYGON]: `https://polygon-mainnet.g.alchemy.com/v2/${envVars.ALCHEMY_API_KEY}`,
         },
       });
     }
@@ -96,137 +111,38 @@ class RpcConfig {
       providers.push({
         name: 'PublicPolygon',
         endpoints: {
-          137: envVars.POLYGON_RPC_URL,
+          [ChainId.POLYGON]: envVars.POLYGON_RPC_URL,
         },
       });
     }
 
     this.providers = providers;
-
-    if (providers.length === 0) {
-      console.warn('⚠️ RpcConfig: No RPC providers configured. Set INFURA_API_KEY, ALCHEMY_API_KEY, or POLYGON_RPC_URL.');
-    } else {
-      console.log(`✓ RpcConfig: Initialized ${this.providers.length} RPC providers: ${this.getAvailableProviders().join(', ')}`);
-    }
+    console.log(`📡 Loaded ${this.providers.length} RPC providers`);
   }
-
-  /**
-   * Initialize round-robin counters for each chain
-   */
-  private initializeCounters(): void {
-    this.roundRobinCounters.set(1, 0);   // Ethereum
-    this.roundRobinCounters.set(137, 0); // Polygon
-  }
-
-  /**
-   * Reinitialize providers (useful after env vars are loaded)
-   */
+  
   public reinitialize(): void {
-    this.providers = [];
-    this.initializeProviders();
-    this.initializeCounters();
-    this.initialized = true;
+    this.loadProviders();
   }
 
   /**
-   * Get next RPC endpoint using round-robin
-   * @param chainId Network chain ID
-   * @returns RPC endpoint URL
+   * Get all loaded RPC providers
+   * @returns An array of RpcProvider objects
    */
-  public getNextRpcEndpoint(chainId: number): string {
-    const available = this.providers.filter(p => p.endpoints[chainId]);
-    if (available.length === 0) {
-      throw new Error(`No RPC provider available for chain ${chainId}`);
+  public getProviders(): RpcProvider[] {
+    return this.providers;
+  }
+
+  public getSupportedChains(): number[] {
+    const chainIds = new Set<number>();
+    for (const provider of this.providers) {
+        for (const chainIdStr in provider.endpoints) {
+            chainIds.add(Number(chainIdStr));
+        }
     }
-
-    const counter = this.roundRobinCounters.get(chainId) || 0;
-    const nextIndex = counter % available.length;
-
-    const provider = available[nextIndex];
-
-    // Increment counter for next call
-    this.roundRobinCounters.set(chainId, (counter + 1) % available.length);
-
-    return provider.endpoints[chainId];
-  }
-
-  /**
-   * Get RPC endpoint from specific provider
-   * @param providerName Name of RPC provider (e.g., 'Infura', 'Alchemy')
-   * @param chainId Network chain ID
-   * @returns RPC endpoint URL
-   */
-  public getRpcEndpointFromProvider(providerName: string, chainId: number): string {
-    const provider = this.providers.find(p => p.name === providerName);
-    if (!provider || !provider.endpoints[chainId]) {
-      throw new Error(`Provider "${providerName}" not available for chain ${chainId}`);
-    }
-    return provider.endpoints[chainId];
-  }
-
-  /**
-   * Get all available RPC providers
-   * @returns Array of provider names
-   */
-  public getAvailableProviders(): string[] {
-    return this.providers.map(p => p.name);
-  }
-
-  /**
-   * Get all endpoints for a specific chain
-   * @param chainId Network chain ID
-   * @returns Array of endpoints for this chain
-   */
-  public getEndpointsForChain(chainId: number): { provider: string; endpoint: string }[] {
-    return this.providers
-      .filter(p => p.endpoints[chainId])
-      .map(p => ({
-        provider: p.name,
-        endpoint: p.endpoints[chainId],
-      }));
-  }
-
-  /**
-   * Check if provider supports a chain
-   * @param providerName Name of RPC provider
-   * @param chainId Network chain ID
-   * @returns True if provider supports the chain
-   */
-  public isProviderSupported(providerName: string, chainId: number): boolean {
-    const provider = this.providers.find(p => p.name === providerName);
-    return provider ? !!provider.endpoints[chainId] : false;
-  }
-
-  /**
-   * Get configuration status
-   */
-  public getStatus(): {
-    providers: string[];
-    counters: Record<number, number>;
-  } {
-    const counters: Record<number, number> = {};
-    this.roundRobinCounters.forEach((value, key) => {
-      counters[key] = value;
-    });
-
-    return {
-      providers: this.getAvailableProviders(),
-      counters,
-    };
-  }
-
-  /**
-   * Reset round-robin counters (for testing)
-   */
-  public resetCounters(): void {
-    this.initializeCounters();
+    return Array.from(chainIds);
   }
 }
 
-// Export getInstance function
-export function getRpcConfig(): RpcConfig {
-  return RpcConfig.getInstance();
-}
-
-// Export class for testing
-export { RpcConfig };
+// Export singleton instance
+export const rpcConfig = RpcConfig.getInstance();
+export const getRpcConfig = RpcConfig.getInstance;

@@ -22,12 +22,9 @@ class ProvidersConfig {
 
   // Lazy-loaded RPC config
   private rpcConfigInstance = getRpcConfig();
-
-  // Track if we've initialized
-  private initialized: boolean = false;
-
+  
   private constructor() {
-    // Lazy initialization
+    // Private constructor for singleton
   }
 
   /**
@@ -37,11 +34,17 @@ class ProvidersConfig {
     if (!ProvidersConfig.instance) {
       ProvidersConfig.instance = new ProvidersConfig();
     }
-    // Initialize on first call
-    if (!ProvidersConfig.instance.initialized) {
-      ProvidersConfig.instance.initialized = true;
-    }
     return ProvidersConfig.instance;
+  }
+  
+  /**
+   * Re-initialize all provider configs
+   * This is necessary because env vars are not available on module load
+   */
+  public reinitialize(): void {
+    this.rpcConfigInstance.reinitialize();
+    explorerConfig.reinitialize();
+    console.log('✓ ProvidersConfig: Re-initialized all providers');
   }
 
   /**
@@ -57,17 +60,17 @@ class ProvidersConfig {
   }
 
   /**
-   * Get all endpoints for a chain
+   * Get all provider endpoints for a chain
    */
   public getChainProviders(chainId: number) {
     return {
-      rpcConfig: this.rpcConfigInstance.getEndpointsForChain(chainId),
+      rpcEndpoint: this.rpcConfigInstance.getRpcEndpoint(chainId),
       etherscan: this.getEtherscanApi(chainId),
     };
   }
 
   /**
-   * Check if a chain is supported
+   * Check if a chain is supported by any provider
    */
   public isChainSupported(chainId: number): boolean {
     const rpcChains = this.rpcConfigInstance.getSupportedChains();
