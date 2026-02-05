@@ -1,9 +1,23 @@
+
 /**
  * ContractAddressConfig
  * 
- * Centralized configuration for protocol and infrastructure contract addresses.
+ * Centralized configuration for protocol and infrastructure contract addresses and ABIs.
  * Organized by network and purpose.
  */
+
+// ABI definitions in human-readable format for ethers.js
+// These are generic for any V2-style Automated Market Maker (AMM)
+export const V2_POOL_ABI = [
+  "function getReserves() view returns (uint112 _reserve0, uint112 _reserve1, uint32 _blockTimestampLast)"
+];
+
+// These are generic for any V3-style Automated Market Maker (AMM)
+export const V3_POOL_ABI = [
+  "function slot0() view returns (uint160 sqrtPriceX96, int24 tick, uint16 observationIndex, uint16 observationCardinality, uint16 observationCardinalityNext, uint8 feeProtocol, bool unlocked)",
+  "function liquidity() view returns (uint128)"
+];
+
 
 interface ContractAddresses {
   multicall: string;
@@ -29,7 +43,7 @@ const CONTRACT_ADDRESSES: {
  * Get contract address for a specific network.
  * This function only supports Ethereum Mainnet (1) and Polygon Mainnet (137).
  * @param chainId - Network chain ID (1 for Ethereum, 137 for Polygon)
- * @param contract - Contract name ('multicall' or 'uniswapV3Factory')
+ * @param contract - Contract name ('multicall')
  * @returns Contract address
  * @throws If the chainId is not 1 or 137.
  */
