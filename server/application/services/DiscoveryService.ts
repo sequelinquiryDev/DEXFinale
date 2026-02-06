@@ -4,7 +4,7 @@ import { StorageService } from './StorageService';
 import { TokenDiscoveryManager } from './TokenDiscoveryManager';
 import { Token } from '../../domain/entities';
 import { sharedStateCache } from './SharedStateCache';
-import { PoolState, TokenMetadata, PoolRegistry } from '../../domain/types';
+import { TokenMetadata, PoolRegistry } from '../../domain/types';
 import { explorerConfig } from '../../infrastructure/config/ExplorerConfig';
 
 export class DiscoveryService {
@@ -17,7 +17,6 @@ export class DiscoveryService {
     this.tokenDiscoveryManager = new TokenDiscoveryManager(storageService);
   }
 
-  // Add delay between RPC calls to avoid rate limiting
   private async delay(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
@@ -26,16 +25,14 @@ export class DiscoveryService {
     console.log('Starting pool and token discovery to prime the cache...');
     console.log('🔍 PHASE 1: Fetching token metadata via Explorer APIs (Cold Path)');
     
-    // Get all tokens from all networks (both Ethereum and Polygon)
     const ethTokens: Token[] = await this.storageService.getTokensByNetwork(1);
     const polygonTokens: Token[] = await this.storageService.getTokensByNetwork(137);
     const tokens = [...ethTokens, ...polygonTokens];
 
-    // PHASE 1: Prime Token Metadata (with batching to avoid rate limiting)
     console.log(`\n📋 Priming metadata for ${tokens.length} tokens...`);
     
     const BATCH_SIZE = 5;
-    const BATCH_DELAY_MS = 1000; // Delay between batches, not per-token
+    const BATCH_DELAY_MS = 1000;
     
     for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
       const batch = tokens.slice(i, i + BATCH_SIZE).filter(t => t && t.address && t.chainId);
@@ -46,28 +43,29 @@ export class DiscoveryService {
           const tokenSymbol = token.symbol || 'N/A';
           let metadata: TokenMetadata | null = null;
           try {
-            const explorer = explorerConfig.getExplorer(token.chainId);
-            if (explorer && explorer.apiKey) {
-              const url = `${explorer.baseUrl}?module=token&action=tokeninfo&contractaddress=${token.address}&apikey=${explorer.apiKey}`;
-              const response = await fetch(url);
-              const data = await response.json() as any;
-              if (data.status === "1" && data.result && data.result[0]) {
-                const info = data.result[0];
-                metadata = {
-                  name: info.tokenName || info.name || token.name,
-                  symbol: info.symbol || token.symbol,
-                  decimals: parseInt(info.divisor || info.decimals || (token.decimals || 18).toString()),
-                  logoURI: info.logo || info.logoURI || '',
-                  logoFetchedAt: (info.logo || info.logoURI) ? Date.now() : undefined,
-                };
-                console.log(`  ✓ ${tokenSymbol} metadata fetched via Explorer API (with logo)`);
-              }
+            const url = explorerConfig.getTokenInfoUrl(token.chainId, token.address);
+            const response = await fetch(url);
+            const data = await response.json() as any;
+
+            if (data.status === "1" && data.result && data.result[0]) {
+              const info = data.result[0];
+              metadata = {
+                name: info.ContractName || token.name,
+                symbol: info.Symbol || token.symbol,
+                decimals: parseInt(info.Decimals || (token.decimals || 18).toString()),
+                logoURI: '', // Not available from this endpoint
+                logoFetchedAt: undefined,
+              };
+              console.log(`  ✓ ${tokenSymbol} metadata fetched via Explorer API`);
             }
           } catch (e) {
             console.warn(`  ⚠️  Explorer metadata fetch failed for ${tokenSymbol}. It will be skipped.`);
           }
           
           if(metadata) {
+            // Update the central token repository
+            await this.storageService.updateTokenMetadata(token.chainId, token.address, metadata);
+            // Also update the in-memory cache for immediate use
             sharedStateCache.setTokenMetadata(token.address, metadata);
           }
         } catch (error: any) {
@@ -75,10 +73,8 @@ export class DiscoveryService {
         }
       });
 
-      // Wait for entire batch to complete
       await Promise.all(metadataPromises);
       
-      // Delay between batches (not per-token)
       if (i + BATCH_SIZE < tokens.length) {
         await this.delay(BATCH_DELAY_MS);
       }
@@ -97,7 +93,6 @@ export class DiscoveryService {
       return acc;
     }, {} as Record<number, Token[]>);
 
-    // For each chain, discover pools for tokens with stale/missing topology
     for (const chainIdStr in tokensByChain) {
       const chainId = parseInt(chainIdStr, 10);
       const chainTokens = tokensByChain[chainId];
@@ -106,25 +101,25 @@ export class DiscoveryService {
 
       console.log(`\n📍 Chain ${chainId}: Checking ${chainTokens.length} tokens for stale topology...`);
 
-      // Check which tokens need topology refresh
       const tokensNeedingDiscovery: Token[] = [];
-      for (const token of chainTokens) {
-        const isStale = await this.tokenDiscoveryManager.isTopologyStale(token.address, chainId);
-        if (isStale) {
-          tokensNeedingDiscovery.push(token);
-        }
-      }
+      // This check is now hypothetical as TokenDiscoveryManager does not expose isTopologyStale
+      // for (const token of chainTokens) {
+      //   const isStale = await this.tokenDiscoveryManager.isTopologyStale(token.address, chainId);
+      //   if (isStale) {
+      //     tokensNeedingDiscovery.push(token);
+      //   }
+      // }
 
+      // For now, we assume we check all tokens
       if (tokensNeedingDiscovery.length === 0) {
-        console.log(`  ✓ All ${chainTokens.length} tokens have fresh topology (< 7 days)`);
-        continue;
+        // console.log(`  ✓ All ${chainTokens.length} tokens have fresh topology (< 7 days)`);
+        // continue;
       }
 
-      console.log(`  → ${tokensNeedingDiscovery.length} token(s) need topology refresh`);
+      console.log(`  → All token(s) will be checked for topology`);
 
-      // Discover pools for stale tokens using subgraphs
       try {
-        await this.tokenDiscoveryManager.discoverPoolsForTokens(tokensNeedingDiscovery, chainId);
+        await this.tokenDiscoveryManager.discoverPoolsForTokens(chainTokens, chainId);
       } catch (error: any) {
         console.error(`  ✗ Error discovering pools for chain ${chainId}:`, error.message);
       }

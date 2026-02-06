@@ -1,6 +1,7 @@
+
+import { EthersAdapter } from '../../infrastructure/adapters/EthersAdapter';
 import { RoutingEngine } from './RoutingEngine';
 import { TradeSimulator } from './TradeSimulator';
-import { sharedStateCache } from './SharedStateCache';
 
 export interface TradeExecutionPlan {
   finalAmountOut: string;
@@ -14,33 +15,27 @@ export class SwapController {
   private routingEngine: RoutingEngine;
   private tradeSimulator: TradeSimulator;
 
-  constructor() {
-    this.routingEngine = new RoutingEngine();
-    this.tradeSimulator = new TradeSimulator();
+  constructor(ethersAdapter: EthersAdapter) {
+    this.routingEngine = new RoutingEngine(ethersAdapter);
+    this.tradeSimulator = new TradeSimulator(ethersAdapter);
   }
 
-  /**
-   * Finds the best trade and returns a quote.
-   * @param tokenIn The address of the input token.
-   * @param tokenOut The address of the output token.
-   * @param amountIn The amount of the input token.
-   * @returns The best quote found, including the route and output amount, or a split distribution.
-   */
   public async getQuote(
     tokenIn: string,
     tokenOut: string,
-    amountIn: string
+    amountIn: string,
+    chainId: number
   ): Promise<{ route?: string[]; amountOut?: string; distribution?: any } | null> {
-    const routes = this.routingEngine.findRoutes(tokenIn, tokenOut);
+    
+    const routes = await this.routingEngine.findRoutes(tokenIn, tokenOut, chainId);
     if (routes.length === 0) {
       return null; // No routes found
     }
 
     const amountInBI = BigInt(amountIn);
 
-    // For a single route, just return the best one
     if (routes.length === 1) {
-      const amountOut = this.tradeSimulator.simulatePath(routes[0], amountInBI);
+      const amountOut = await this.tradeSimulator.simulatePath(routes[0], amountInBI, chainId);
       if (!amountOut) {
         return null;
       }
@@ -50,8 +45,7 @@ export class SwapController {
       };
     }
 
-    // For multiple routes, find the optimal split allocation
-    const plan = this.findOptimalSplit(routes, amountInBI);
+    const plan = await this.findOptimalSplit(routes, amountInBI, chainId);
     if (!plan) {
       return null;
     }
@@ -59,28 +53,20 @@ export class SwapController {
     return plan;
   }
 
-  /**
-   * Allocates the input amount across multiple routes to maximize output.
-   * Uses an iterative algorithm that greedily allocates to the best marginal rate.
-   * @param routes All available trading routes.
-   * @param amountIn Total input amount to split.
-   * @returns A trade execution plan with distribution across routes.
-   */
-  private findOptimalSplit(
+  private async findOptimalSplit(
     routes: string[][],
-    amountIn: bigint
-  ): TradeExecutionPlan | null {
+    amountIn: bigint,
+    chainId: number
+  ): Promise<TradeExecutionPlan | null> {
     if (routes.length === 0) {
       return null;
     }
 
-    // Initialize allocations for each route
     const allocations: bigint[] = routes.map(() => 0n);
-    const incrementSize = amountIn / BigInt(100); // Use 1% increments for granularity
+    const incrementSize = amountIn / BigInt(100); 
 
     if (incrementSize === 0n) {
-      // If amount is too small, just use the first route
-      const amountOut = this.tradeSimulator.simulatePath(routes[0], amountIn);
+      const amountOut = await this.tradeSimulator.simulatePath(routes[0], amountIn, chainId);
       if (!amountOut) {
         return null;
       }
@@ -92,20 +78,22 @@ export class SwapController {
 
     let remainingAmount = amountIn;
 
-    // Greedy allocation: repeatedly assign increments to the best marginal route
     while (remainingAmount > 0n) {
       const allocAmount = remainingAmount < incrementSize ? remainingAmount : incrementSize;
-      let bestRouteIdx = 0;
-      let bestMarginalOutput = 0n;
+      let bestRouteIdx = -1;
+      let bestMarginalOutput = -1n;
 
-      // Find which route offers the best marginal output for this increment
       for (let i = 0; i < routes.length; i++) {
-        const testAllocation = allocations[i] + allocAmount;
-        const outputForRoute = this.tradeSimulator.simulatePath(routes[i], testAllocation);
+        const currentAllocation = allocations[i];
+        const testAllocation = currentAllocation + allocAmount;
+        
+        const [currentOutput, nextOutput] = await Promise.all([
+            currentAllocation > 0n ? this.tradeSimulator.simulatePath(routes[i], currentAllocation, chainId) : Promise.resolve(0n),
+            this.tradeSimulator.simulatePath(routes[i], testAllocation, chainId)
+        ]);
 
-        if (outputForRoute) {
-          // Marginal output is the additional output from this increment
-          const marginalOutput = outputForRoute - (allocations[i] > 0n ? this.tradeSimulator.simulatePath(routes[i], allocations[i]) || 0n : 0n);
+        if (nextOutput) {
+          const marginalOutput = nextOutput - (currentOutput || 0n);
           if (marginalOutput > bestMarginalOutput) {
             bestMarginalOutput = marginalOutput;
             bestRouteIdx = i;
@@ -113,17 +101,21 @@ export class SwapController {
         }
       }
 
-      allocations[bestRouteIdx] += allocAmount;
-      remainingAmount -= allocAmount;
+      if (bestRouteIdx !== -1) {
+        allocations[bestRouteIdx] += allocAmount;
+        remainingAmount -= allocAmount;
+      } else {
+        // No profitable route found for this increment, so break.
+        break;
+      }
     }
 
-    // Calculate final outputs for each route and total
     let totalAmountOut = 0n;
     const distribution: { route: string[]; amount: string; output: string }[] = [];
 
     for (let i = 0; i < routes.length; i++) {
       if (allocations[i] > 0n) {
-        const output = this.tradeSimulator.simulatePath(routes[i], allocations[i]);
+        const output = await this.tradeSimulator.simulatePath(routes[i], allocations[i], chainId);
         if (output) {
           distribution.push({
             route: routes[i],
@@ -145,4 +137,3 @@ export class SwapController {
     };
   }
 }
-

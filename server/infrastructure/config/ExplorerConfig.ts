@@ -30,13 +30,11 @@ class ExplorerConfig {
   }
 
   private initializeExplorers(): void {
-    // Centralized API key map
     const explorerKeys: Record<string, string | undefined> = {
       [ChainId.ETHEREUM]: process.env.ETHERSCAN_API_KEY,
       [ChainId.POLYGON]: process.env.POLYGONSCAN_API_KEY || process.env.ETHERSCAN_API_KEY,
     };
 
-    // Warn for missing keys
     if (!explorerKeys[ChainId.ETHEREUM]) console.warn(`ETHERSCAN_API_KEY not set. Some explorer API features may be limited.`);
     if (!explorerKeys[ChainId.POLYGON]) console.warn(`POLYGONSCAN_API_KEY not set. Some explorer API features may be limited.`);
 
@@ -47,8 +45,6 @@ class ExplorerConfig {
       if (!network) continue;
 
       const apiKey = explorerKeys[chainId] || "";
-      // Construct the API base URL from the general block explorer URL
-      // e.g., https://etherscan.io -> https://api.etherscan.io/api
       const apiUrl = network.blockExplorer.url.replace("//", "//api.") + "/api";
 
       this.explorers.set(chainId, {
@@ -56,19 +52,15 @@ class ExplorerConfig {
         baseUrl: apiUrl,
         apiKey: apiKey,
         endpoints: {
-          tokenInfo: network.blockExplorer.tokenUrl, // From networkConfig
-          tokenHolders: network.blockExplorer.tokenUrl, // From networkConfig
-          transactionHistory: `${network.blockExplorer.url}/tx/`,
+          // Correctly define API endpoints as query strings
+          tokenInfo: `?module=contract&action=getsourcecode`,
+          tokenHolders: `?module=token&action=tokenholderlist`,
+          transactionHistory: `?module=account&action=txlist`,
         },
       });
     }
 
     console.log(`✓ ExplorerConfig: Initialized ${this.explorers.size} block explorers`);
-  }
-
-  public reinitialize(): void {
-    this.explorers.clear();
-    this.initializeExplorers();
   }
 
   public getExplorer(chainId: number): ExplorerApi {
@@ -77,23 +69,24 @@ class ExplorerConfig {
     return explorer;
   }
 
+  public getTokenInfoUrl(chainId: number, tokenAddress: string): string {
+    const explorer = this.getExplorer(chainId);
+    return `${explorer.baseUrl}${explorer.endpoints.tokenInfo}&address=${tokenAddress}&apikey=${explorer.apiKey}`;
+  }
+  
+  public getTransactionUrl(chainId: number, txHash: string): string {
+    const network = networkConfig.getNetwork(chainId);
+    return `${network.blockExplorer.url}/tx/${txHash}`;
+  }
+  
+  // Other methods remain the same...
+  public reinitialize(): void {
+    this.explorers.clear();
+    this.initializeExplorers();
+  }
+
   public getExplorerName(chainId: number): string {
     return this.getExplorer(chainId).name;
-  }
-
-  public getExplorerApiUrl(chainId: number): string {
-    const explorer = this.getExplorer(chainId);
-    return explorer.apiKey && explorer.apiKey.length > 0
-      ? `${explorer.baseUrl}?apikey=${explorer.apiKey}`
-      : explorer.baseUrl;
-  }
-
-  public getTokenUrl(chainId: number, tokenAddress: string): string {
-    return `${this.getExplorer(chainId).endpoints.tokenInfo}${tokenAddress}`;
-  }
-
-  public getTransactionUrl(chainId: number, txHash: string): string {
-    return `${this.getExplorer(chainId).endpoints.transactionHistory}${txHash}`;
   }
 
   public getSupportedChains(): number[] {
@@ -117,6 +110,5 @@ class ExplorerConfig {
   }
 }
 
-// Singleton instance
 export const explorerConfig = ExplorerConfig.getInstance();
 export { ExplorerConfig };

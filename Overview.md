@@ -2,12 +2,12 @@
 
 Program Workflow Explanation
 
-Goal: Maintain accurate pool and token data for spot pricing and swaps, using a combination of discovery, identity, topology, and state layers.
+Goal: Maintain accurate pool and token data for spot pricing and swaps, using a combination of discovery, topology, and state layers.
 
 
 ---
 
-1️⃣ Discovery Layer (Token Discovery)
+1️⃣ Frontier Layer (Token adresses)
 
 Source: External APIs like CoinGecko (or similar) to get new token addresses.
 
@@ -27,7 +27,7 @@ Workflow:
 
 Notes:
 
-Discovery is decoupled from on-chain data.
+Frontier is decoupled from on-chain data.
 
 Only updates when new tokens appear.
 
@@ -168,7 +168,7 @@ Swapper may query multiple pools across multiple hops per swap.
 
 5️⃣ System Summary
 
-Discovery (Coingecko / external API) → finds new tokens.
+Frontier (Coingecko / external API) → finds new tokens.
 
 Identity (Explorer APIs) → fetch logos and metadata. (alongside public fallback resources). 
 

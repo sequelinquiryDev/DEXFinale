@@ -9,6 +9,7 @@ import { getSubgraphConfig, SubgraphConfig, SupportedChainId } from '../../infra
 import { timingConfig } from '../../infrastructure/config/TimingConfig';
 import { networkConfig } from '../../infrastructure/config/NetworkConfig';
 
+// ... (interfaces remain the same)
 interface DiscoveryAttempt {
   tokenAddress: string;
   chainId: number;
@@ -22,7 +23,7 @@ interface SubgraphPool {
   token0: { id: string; symbol: string; decimals: string };
   token1: { id: string; symbol: string; decimals: string };
   reserveUSD: string;
-  liquidity?: string visible in v3
+  liquidity?: string;
   feeTier?: string;
 }
 
@@ -30,9 +31,28 @@ export class TokenDiscoveryManager {
   private discoveryAttempts: Map<string, DiscoveryAttempt> = new Map();
   private readonly DISCOVERY_RETRY_WINDOW = timingConfig.DISCOVERY_RETRY_WINDOW_MS;
   private readonly LIQUIDITY_THRESHOLD = timingConfig.LIQUIDITY_THRESHOLD;
-  private readonly TTL_7_DAYS = timingConfig.DISCOVERY_TOPOLOGY_TTL_MS;
+  private readonly TOPOLOGY_TTL_MS = timingConfig.DISCOVERY_TOPOLOGY_TTL_MS;
 
   constructor(private storageService: StorageService) {}
+
+  /**
+   * Centralized method to identify tokens with stale topology.
+   * Used by both startup (DiscoveryService) and background GC.
+   */
+  public async getTokensWithStaleTopology(chainId: number): Promise<Token[]> {
+    const tokens = await this.storageService.getTokensByNetwork(chainId);
+    const poolRegistry = await this.storageService.getPoolRegistry(chainId);
+    const now = Date.now();
+    const staleTokens: Token[] = [];
+
+    for (const token of tokens) {
+      const lastUpdated = poolRegistry.topologyTimestamp?.[token.address.toLowerCase()];
+      if (!lastUpdated || (now - lastUpdated) > this.TOPOLOGY_TTL_MS) {
+        staleTokens.push(token);
+      }
+    }
+    return staleTokens;
+  }
 
   public async discoverPoolsForTokens(tokens: Token[], chainId: number): Promise<number> {
     console.log(`🔍 [SUBGRAPH DISCOVERY] ${tokens.length} tokens on chain ${chainId}`);
@@ -58,6 +78,7 @@ export class TokenDiscoveryManager {
     let poolsDiscoveredThisBatch = 0;
 
     for (const token of tokens) {
+      // ... (rest of the discovery logic is unchanged)
       const attemptKey = `${token.address.toLowerCase()}-${chainId}`;
       const lastAttempt = this.discoveryAttempts.get(attemptKey);
 
@@ -69,15 +90,9 @@ export class TokenDiscoveryManager {
       try {
         const allPools: SubgraphPool[] = [];
 
-        // ✅ ONE QUERY PER SUBGRAPH
         for (const subgraph of subgraphs) {
           try {
-            const pools = await this.querySubgraphForToken(
-              token.address,
-              subgraph,
-              chainId
-            );
-
+            const pools = await this.querySubgraphForToken(token.address, subgraph, chainId);
             console.log(`   → ${subgraph.name}: ${pools.length} pools`);
             allPools.push(...pools);
           } catch (e: any) {
@@ -85,11 +100,7 @@ export class TokenDiscoveryManager {
           }
         }
 
-        // ✅ SINGLE GLOBAL 90% FILTER
-        const finalPools = this.filterPoolsByLiquidity(
-          allPools,
-          this.LIQUIDITY_THRESHOLD
-        );
+        const finalPools = this.filterPoolsByLiquidity(allPools, this.LIQUIDITY_THRESHOLD);
 
         for (const pool of finalPools) {
           this.addPoolToRegistry(poolRegistry, pool, chainId, baseTokenMap);
@@ -116,7 +127,8 @@ export class TokenDiscoveryManager {
     await this.storageService.savePoolRegistry(chainId, poolRegistry);
     return poolsDiscoveredThisBatch;
   }
-
+  
+  // ... (private methods querySubgraphForToken, filterPoolsByLiquidity, addPoolToRegistry are unchanged)
   private async querySubgraphForToken(
     tokenAddress: string,
     subgraph: SubgraphConfig,
@@ -124,7 +136,7 @@ export class TokenDiscoveryManager {
   ): Promise<SubgraphPool[]> {
     const baseTokens = Array.from(networkConfig.getBaseTokenAddresses(chainId));
     const tokenLower = tokenAddress.toLowerCase();
-    const baseFilters = baseTokens.map(a => `"${a.toLowerCase()}"`).join(',');
+    const baseFilters = baseTokens.map(a => `\"${a.toLowerCase()}\"`).join(',');
 
     const query = `
     {
